@@ -36,7 +36,7 @@ tabs = st.tabs(["S1", "S2", "S3", "S4", "S5", "Comparison"])
 for i, tab in enumerate(tabs[:5], start=1):
     with tab:
         scenario_key = f"S{i}"
-                # Scenario copy controls
+        # Scenario copy controls
         copy_from = st.selectbox(
             "Copy inputs from",
             ["(none)", "S1", "S2", "S3", "S4", "S5"],
@@ -60,6 +60,9 @@ for i, tab in enumerate(tabs[:5], start=1):
                     "lag_rc_days",
                     "sar_pct",
                     "rr_pct",
+                    "uncertainty_enabled",
+                    "uncertainty_lower_pct",
+                    "uncertainty_upper_pct",
                 ]
                 for k in keys_to_copy:
                     src = f"{copy_from}_{k}"
@@ -147,6 +150,7 @@ with tabs[5]:
         st.info("No included scenarios with results yet. Run at least one scenario and enable 'Include in comparison'.")
     else:
         import pandas as pd
+        import altair as alt
 
         dfs = []
         for sk in included:
@@ -173,5 +177,46 @@ with tabs[5]:
         merged = merged.fillna(method="ffill").fillna(0.0)
 
         st.subheader(f"Cumulative {compare_state} over time")
-        st.line_chart(merged.set_index("date")[included])
 
+        long_df = merged.melt(id_vars=["date"], value_vars=included, var_name="scenario", value_name="value")
+
+        # Compute per-scenario bands
+        lower_vals = []
+        upper_vals = []
+        enabled_vals = []
+        for _, row in long_df.iterrows():
+            sk = row["scenario"]
+            enabled = st.session_state.get(f"{sk}_uncertainty_enabled", False)
+            lower_pct = float(st.session_state.get(f"{sk}_uncertainty_lower_pct", 10.0))
+            upper_pct = float(st.session_state.get(f"{sk}_uncertainty_upper_pct", 10.0))
+            lower_vals.append(max(0.0, row["value"] * (1.0 - lower_pct / 100.0)))
+            upper_vals.append(row["value"] * (1.0 + upper_pct / 100.0))
+            enabled_vals.append(enabled)
+
+        long_df["lower"] = lower_vals
+        long_df["upper"] = upper_vals
+        long_df["uncertainty_enabled"] = enabled_vals
+
+        base = alt.Chart(long_df).encode(
+            x=alt.X("date:T", title="Date"),
+            color=alt.Color("scenario:N", title="Scenario"),
+        )
+
+        layers = []
+        if long_df["uncertainty_enabled"].any():
+            layers.append(
+                base.transform_filter(alt.datum.uncertainty_enabled == True)
+                .mark_area(opacity=0.18)
+                .encode(
+                    y=alt.Y("lower:Q", title="Cumulative"),
+                    y2="upper:Q",
+                )
+            )
+
+        layers.append(
+            base.mark_line().encode(
+                y=alt.Y("value:Q", title="Cumulative"),
+            )
+        )
+
+        st.altair_chart(alt.layer(*layers).properties(height=320), use_container_width=True)

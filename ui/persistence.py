@@ -50,6 +50,9 @@ def dump_session_state(settings: GlobalSettings, session_state: dict) -> dict:
             "sar_pct",
             "rr_pct",
             "include",
+            "uncertainty_enabled",
+            "uncertainty_lower_pct",
+            "uncertainty_upper_pct",
         ]
         for k in keys:
             ss_key = f"{sk}_{k}"
