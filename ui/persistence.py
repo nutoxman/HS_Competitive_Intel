@@ -25,6 +25,22 @@ def _str_to_date(s: Any) -> Any:
     return s
 
 
+def _convert_dates(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {k: _convert_dates(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_convert_dates(v) for v in obj]
+    return _date_to_str(obj)
+
+
+def _restore_dates(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {k: _restore_dates(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_restore_dates(v) for v in obj]
+    return _str_to_date(obj)
+
+
 def dump_session_state(settings: GlobalSettings, session_state: dict) -> dict:
     payload: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -83,3 +99,60 @@ def to_json_bytes(payload: dict) -> bytes:
 
 def from_json_bytes(b: bytes) -> dict:
     return json.loads(b.decode("utf-8"))
+
+
+ADV_SCHEMA_VERSION = 1
+
+
+def dump_advanced_state(session_state: dict) -> dict:
+    keys = [
+        "adv_goal_type",
+        "adv_goal_n",
+        "adv_screen_fail_rate",
+        "adv_discontinuation_rate",
+        "adv_period_type",
+        "adv_driver",
+        "adv_lag_sr_days",
+        "adv_lag_rc_days",
+        "adv_uncertainty_enabled",
+        "adv_uncertainty_lower_pct",
+        "adv_uncertainty_upper_pct",
+        "adv_global_fsfv",
+        "adv_global_lsfv",
+        "adv_global_sites",
+        "adv_global_sar_pct",
+        "adv_global_rr_pct",
+        "adv_selected_countries",
+        "adv_country_config",
+        "adv_map_metric",
+        "adv_map_view",
+        "adv_pie_enabled",
+        "adv_pie_scope",
+        "adv_pie_metric_family",
+        "adv_pie_state",
+        "adv_pie_label_mode",
+        "adv_pie_country",
+        "adv_selected_country",
+    ]
+
+    payload: dict[str, Any] = {
+        "schema_version": ADV_SCHEMA_VERSION,
+        "advanced": {},
+    }
+
+    for k in keys:
+        if k in session_state:
+            payload["advanced"][k] = _convert_dates(session_state[k])
+
+    return payload
+
+
+def load_advanced_state(payload: dict, session_state: dict) -> None:
+    adv = payload.get("advanced", {})
+    for k, v in adv.items():
+        session_state[k] = _restore_dates(v)
+
+    # Clear results and editor state
+    session_state.pop("adv_results", None)
+    session_state.pop("adv_country_editor", None)
+    session_state["adv_initialized"] = True
