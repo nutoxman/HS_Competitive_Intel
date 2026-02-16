@@ -1,17 +1,12 @@
-.PHONY: fmt lint test run
-
-fmt:
-	black .
-	ruff check . --fix
-	ruff format .
-
-lint:
-	ruff check .
-	black --check .
-
-test:
-	pytest
+VENV=.venv
+PYTHON=$(VENV)/bin/python
+STREAMLIT=$(VENV)/bin/streamlit
+PYTEST=$(VENV)/bin/pytest
 
 run:
-	streamlit run ui/app.py
+	$(STREAMLIT) run ui/app.py
+
+test:
+	$(PYTEST)
+
 
