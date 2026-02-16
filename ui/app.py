@@ -24,6 +24,50 @@ tabs = st.tabs(["S1", "S2", "S3", "S4", "S5", "Comparison"])
 for i, tab in enumerate(tabs[:5], start=1):
     with tab:
         scenario_key = f"S{i}"
+                # Scenario copy controls
+        copy_from = st.selectbox(
+            "Copy inputs from",
+            ["(none)", "S1", "S2", "S3", "S4", "S5"],
+            index=0,
+            key=f"{scenario_key}_copy_from",
+        )
+        if st.button("Copy", key=f"{scenario_key}_copy_btn"):
+            if copy_from != "(none)" and copy_from != scenario_key:
+                # Copy known session_state keys
+                keys_to_copy = [
+                    "goal_type",
+                    "goal_n",
+                    "screen_fail_rate",
+                    "discontinuation_rate",
+                    "period_type",
+                    "driver",
+                    "fsfv",
+                    "lsfv",
+                    "sites",
+                    "lag_sr_days",
+                    "lag_rc_days",
+                    "sar_pct",
+                    "rr_pct",
+                ]
+                for k in keys_to_copy:
+                    src = f"{copy_from}_{k}"
+                    dst = f"{scenario_key}_{k}"
+                    if src in st.session_state:
+                        st.session_state[dst] = st.session_state[src]
+
+                # Clear results (force rerun)
+                st.session_state.pop(f"{scenario_key}_result", None)
+
+                # Also reset editor widgets so Streamlit rebinds cleanly
+                st.session_state.pop(f"{scenario_key}_sar_editor", None)
+                st.session_state.pop(f"{scenario_key}_rr_editor", None)
+
+                st.success(f"Copied inputs from {copy_from} → {scenario_key}")
+            elif copy_from == scenario_key:
+                st.info("Pick a different scenario to copy from.")
+            else:
+                st.info("Select a scenario to copy from.")
+
         inputs = render_scenario_inputs(scenario_key)
 
         if st.button(f"Run {scenario_key}", key=f"run_{scenario_key}", type="primary"):
