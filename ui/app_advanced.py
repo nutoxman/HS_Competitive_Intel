@@ -39,6 +39,25 @@ def load_countries() -> pd.DataFrame:
     return df
 
 
+def _format_number(value):
+    if value is None:
+        return ""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if value.is_integer():
+            return int(value)
+        return round(value, 2)
+    return value
+
+
+def _format_dataframe_numbers(df: pd.DataFrame) -> pd.DataFrame:
+    def fmt(v):
+        return _format_number(v)
+
+    return df.applymap(fmt)
+
+
 def _init_defaults() -> None:
     defaults = {
         "adv_goal_type": "Randomized",
@@ -54,9 +73,9 @@ def _init_defaults() -> None:
         "adv_uncertainty_upper_pct": 10.0,
         "adv_global_fsfv": date(2026, 1, 1),
         "adv_global_lsfv": date(2026, 6, 1),
-        "adv_global_sites": 50,
-        "adv_global_sar_pct": [0, 20, 40, 60, 80, 100],
-        "adv_global_rr_pct": [0.0, 0.5, 1.0, 1.0, 1.0, 1.0],
+        "adv_global_sites": 10,
+        "adv_global_sar_pct": [20, 40, 60, 80, 100, 100],
+        "adv_global_rr_pct": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
         "adv_selected_countries": [],
         "adv_country_config": {},
         "adv_map_metric": "Randomized total",
@@ -304,12 +323,18 @@ def render() -> None:
             else:
                 st.number_input("Default Sites", min_value=1, step=1, key="adv_global_sites")
 
-        st.markdown("### Global Defaults — SAR ramp (percent of sites active)")
+        st.markdown("### Global Defaults — Site Activation Rate at % Milestones from FSFV to LSFV")
         sar_df = pd.DataFrame([st.session_state["adv_global_sar_pct"]], columns=["0%", "20%", "40%", "60%", "80%", "100%"])
         sar_edit = st.data_editor(sar_df, num_rows="fixed", hide_index=True, key="adv_global_sar_editor")
         st.session_state["adv_global_sar_pct"] = [float(sar_edit.iloc[0][c]) for c in sar_edit.columns]
 
-        st.markdown("### Global Defaults — RR ramp (subjects per site per month)")
+        rr_label_map = {
+            "Screened": "screened",
+            "Randomized": "randomized",
+            "Completed": "completed",
+        }
+        rr_label = rr_label_map.get(st.session_state["adv_period_type"], "randomized")
+        st.markdown(f"### Global Defaults — # of subjects {rr_label}/site/month")
         rr_df = pd.DataFrame([st.session_state["adv_global_rr_pct"]], columns=["0%", "20%", "40%", "60%", "80%", "100%"])
         rr_edit = st.data_editor(rr_df, num_rows="fixed", hide_index=True, key="adv_global_rr_editor")
         st.session_state["adv_global_rr_pct"] = [float(rr_edit.iloc[0][c]) for c in rr_edit.columns]
@@ -676,7 +701,8 @@ def render() -> None:
                     "Warning": r["warning"],
                 })
 
-        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+        summary_df = _format_dataframe_numbers(pd.DataFrame(rows))
+        st.dataframe(summary_df, use_container_width=True)
 
         st.markdown("## Global Roll-up")
         if res["global_lslv"]:
@@ -690,9 +716,9 @@ def render() -> None:
             g_scr = res["global_states"].screened.cumulative
             g_rand = res["global_states"].randomized.cumulative
             g_comp = res["global_states"].completed.cumulative
-            col1.metric("Global Screened", round(max(g_scr.values()) if g_scr else 0.0))
-            col2.metric("Global Randomized", round(max(g_rand.values()) if g_rand else 0.0))
-            col3.metric("Global Completed", round(max(g_comp.values()) if g_comp else 0.0))
+            col1.metric("Global Screened", _format_number(max(g_scr.values()) if g_scr else 0.0))
+            col2.metric("Global Randomized", _format_number(max(g_rand.values()) if g_rand else 0.0))
+            col3.metric("Global Completed", _format_number(max(g_comp.values()) if g_comp else 0.0))
 
             st.markdown("### Global Cumulative Curves")
             gstate = st.selectbox("Global state", ["Screened", "Randomized", "Completed"], key="adv_global_state")
@@ -706,7 +732,13 @@ def render() -> None:
             df["state"] = gstate
 
             layers = []
-            base = alt.Chart(df).encode(x=alt.X("date:T", title="Date"))
+            domain_min = df["date"].min()
+            if res.get("global_lslv"):
+                domain_max = res["global_lslv"] + pd.Timedelta(days=30)
+            else:
+                domain_max = df["date"].max()
+
+            base = alt.Chart(df).encode(x=alt.X("date:T", title="Date", scale=alt.Scale(domain=[domain_min, domain_max])))
 
             if res.get("global_uncertainty"):
                 lower = {
@@ -727,7 +759,7 @@ def render() -> None:
                 layers.append(
                     alt.Chart(df_band)
                     .mark_area(opacity=0.18)
-                    .encode(x="date:T", y="lower:Q", y2="upper:Q")
+                    .encode(x=alt.X("date:T", scale=alt.Scale(domain=[domain_min, domain_max])), y="lower:Q", y2="upper:Q")
                 )
 
             layers.append(base.mark_line().encode(y=alt.Y("value:Q", title="Cumulative")))
@@ -753,6 +785,8 @@ def render() -> None:
             df["state"] = sel_state
 
             layers = []
+            domain_min = df["date"].min()
+            domain_max = out.timelines.completed_lslv + pd.Timedelta(days=30)
             if country_result["uncertainty"]:
                 lower = {
                     "Screened": country_result["uncertainty"]["lower_states"].screened.cumulative,
@@ -772,10 +806,14 @@ def render() -> None:
                 layers.append(
                     alt.Chart(df_band)
                     .mark_area(opacity=0.18)
-                    .encode(x="date:T", y="lower:Q", y2="upper:Q")
+                    .encode(x=alt.X("date:T", scale=alt.Scale(domain=[domain_min, domain_max])), y="lower:Q", y2="upper:Q")
                 )
 
-            layers.append(alt.Chart(df).mark_line().encode(x="date:T", y="value:Q"))
+            layers.append(
+                alt.Chart(df)
+                .mark_line()
+                .encode(x=alt.X("date:T", scale=alt.Scale(domain=[domain_min, domain_max])), y="value:Q")
+            )
             st.altair_chart(alt.layer(*layers).properties(height=320), use_container_width=True)
         else:
             st.info("No successful countries to display.")

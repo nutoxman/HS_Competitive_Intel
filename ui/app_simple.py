@@ -54,6 +54,7 @@ def render():
                         "screen_fail_rate",
                         "discontinuation_rate",
                         "period_type",
+                        "simple_scenario",
                         "driver",
                         "fsfv",
                         "lsfv",
@@ -91,6 +92,7 @@ def render():
                 try:
                     out = run_simple_scenario(inputs, settings)
                     st.session_state[f"{scenario_key}_result"] = out
+                    st.rerun()
                 except ValidationError as e:
                     st.error(str(e))
                 except Exception as e:

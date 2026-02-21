@@ -19,6 +19,18 @@ def _max_cumulative(series: dict) -> float:
     return max(series.values()) if series else 0.0
 
 
+def _format_number(value):
+    if value is None:
+        return ""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if value.is_integer():
+            return int(value)
+        return round(value, 2)
+    return value
+
+
 def _build_map_df(results: list[dict[str, Any]]) -> pd.DataFrame:
     rows = []
     for r in results:
@@ -224,8 +236,8 @@ def build_advanced_pdf(res: dict, session_state: dict, countries_df: pd.DataFram
                 [
                     r["country"],
                     r["region"],
-                    round(out.targets.randomized),
-                    round(out.targets.completed),
+                    _format_number(out.targets.randomized),
+                    _format_number(out.targets.completed),
                     out.solve.solved_sites or "",
                     out.solve.solved_lsfv.isoformat() if out.solve.solved_lsfv else "",
                     out.timelines.completed_lslv.isoformat() if out.timelines.completed_lslv else "",

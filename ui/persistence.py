@@ -57,6 +57,7 @@ def dump_session_state(settings: GlobalSettings, session_state: dict) -> dict:
             "screen_fail_rate",
             "discontinuation_rate",
             "period_type",
+            "simple_scenario",
             "driver",
             "fsfv",
             "lsfv",
