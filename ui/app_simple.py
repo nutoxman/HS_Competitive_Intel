@@ -223,7 +223,7 @@ def render():
                 )
             )
 
-            st.altair_chart(alt.layer(*layers).properties(height=320), use_container_width=True)
+            st.altair_chart(alt.layer(*layers).properties(height=320), width="stretch")
 
 
 if __name__ == "__main__":

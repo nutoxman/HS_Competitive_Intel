@@ -182,7 +182,7 @@ def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
         sar_input_df,
         num_rows="fixed",
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config=sar_input_config,
         key=f"{scenario_key}_sar_editor",
     )
@@ -207,7 +207,7 @@ def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
         st.caption("Calculated outputs at milestones")
         st.dataframe(
             sar_out_df,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config=sar_output_config,
         )
@@ -234,7 +234,7 @@ def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
         rr_input_df,
         num_rows="fixed",
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config=rr_input_config,
         key=f"{scenario_key}_rr_editor",
     )
@@ -260,7 +260,7 @@ def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
         st.caption("Calculated outputs at milestones")
         st.dataframe(
             rr_out_df,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config=rr_output_config,
         )
@@ -431,7 +431,7 @@ def render_results(out, scenario_key: str):
     if show_sites:
         chart = chart.resolve_scale(y="independent")
 
-    st.altair_chart(chart, use_container_width=True)
+    st.altair_chart(chart, width="stretch")
 
     st.markdown("### Bucket summary (Monthly, Randomized)")
     bucket_df = pd.DataFrame(out.buckets["month"]["Randomized"]).rename(
@@ -443,13 +443,13 @@ def render_results(out, scenario_key: str):
         }
     )
     bucket_df = _format_dataframe_numbers(bucket_df)
-    st.dataframe(bucket_df, use_container_width=True)
+    st.dataframe(bucket_df, width="stretch")
 
     st.markdown("## Incremental (5%) milestones over time")
     sel_state = st.selectbox("State", ["Screened", "Randomized", "Completed"], key=f"{scenario_key}_milestone_state")
     milestones_time_df = _format_dataframe_numbers(pd.DataFrame(out.milestones_time[sel_state]))
-    st.dataframe(milestones_time_df, use_container_width=True)
+    st.dataframe(milestones_time_df, width="stretch")
 
     st.markdown("## Target milestones (5% of target)")
     milestones_target_df = _format_dataframe_numbers(pd.DataFrame(out.milestones_target[sel_state]))
-    st.dataframe(milestones_target_df, use_container_width=True)
+    st.dataframe(milestones_target_df, width="stretch")

@@ -426,7 +426,7 @@ def render() -> None:
         edited_df = st.data_editor(
             country_df,
             num_rows="fixed",
-            use_container_width=True,
+            width="stretch",
             key="adv_country_editor",
             column_config=column_config,
         )
@@ -702,7 +702,7 @@ def render() -> None:
                 })
 
         summary_df = _format_dataframe_numbers(pd.DataFrame(rows))
-        st.dataframe(summary_df, use_container_width=True)
+        st.dataframe(summary_df, width="stretch")
 
         st.markdown("## Global Roll-up")
         if res["global_lslv"]:
@@ -710,8 +710,10 @@ def render() -> None:
         else:
             st.info("No global LSLV available (no successful countries).")
 
-        # Global chart
-        if res["global_states"]:
+        ok_results = [r for r in res["countries"] if r["status"] == "ok" and r["result"]]
+
+        # Global chart (global + countries)
+        if res["global_states"] and ok_results:
             col1, col2, col3 = st.columns(3)
             g_scr = res["global_states"].screened.cumulative
             g_rand = res["global_states"].randomized.cumulative
@@ -720,26 +722,63 @@ def render() -> None:
             col2.metric("Global Randomized", _format_number(max(g_rand.values()) if g_rand else 0.0))
             col3.metric("Global Completed", _format_number(max(g_comp.values()) if g_comp else 0.0))
 
-            st.markdown("### Global Cumulative Curves")
-            gstate = st.selectbox("Global state", ["Screened", "Randomized", "Completed"], key="adv_global_state")
-            series = {
+            st.markdown("### Global + Country Cumulative Curves")
+            gstate = st.selectbox("State", ["Screened", "Randomized", "Completed"], key="adv_global_state")
+
+            st.markdown("#### Line colors")
+            global_line_color = st.color_picker(
+                "Global cumulative enrollment line",
+                value=st.session_state.get("adv_global_line_color", "#1b9e77"),
+                key="adv_global_line_color",
+            )
+
+            country_palette = [
+                "#1f77b4",
+                "#ff7f0e",
+                "#2ca02c",
+                "#d62728",
+                "#9467bd",
+                "#8c564b",
+                "#e377c2",
+                "#7f7f7f",
+                "#bcbd22",
+                "#17becf",
+            ]
+            country_entries = [(r["country"], r["iso3"]) for r in ok_results]
+            country_color_map = {}
+            with st.expander("Country line colors", expanded=False):
+                for idx, (name, iso) in enumerate(country_entries):
+                    key = f"adv_country_color_{iso}"
+                    default_color = st.session_state.get(key, country_palette[idx % len(country_palette)])
+                    country_color_map[name] = st.color_picker(name, value=default_color, key=key)
+
+            rows = []
+            for r in ok_results:
+                out = r["result"]
+                series = {
+                    "Screened": out.states.screened.cumulative,
+                    "Randomized": out.states.randomized.cumulative,
+                    "Completed": out.states.completed.cumulative,
+                }[gstate]
+                for d, v in series.items():
+                    rows.append({"date": d, "value": v, "country": r["country"]})
+
+            global_series = {
                 "Screened": res["global_states"].screened.cumulative,
                 "Randomized": res["global_states"].randomized.cumulative,
                 "Completed": res["global_states"].completed.cumulative,
             }[gstate]
+            for d, v in global_series.items():
+                rows.append({"date": d, "value": v, "country": "Global"})
 
-            df = pd.DataFrame({"date": list(series.keys()), "value": list(series.values())}).sort_values("date")
-            df["state"] = gstate
-
-            layers = []
+            df = pd.DataFrame(rows).sort_values("date")
             domain_min = df["date"].min()
             if res.get("global_lslv"):
                 domain_max = res["global_lslv"] + pd.Timedelta(days=30)
             else:
                 domain_max = df["date"].max()
 
-            base = alt.Chart(df).encode(x=alt.X("date:T", title="Date", scale=alt.Scale(domain=[domain_min, domain_max])))
-
+            layers = []
             if res.get("global_uncertainty"):
                 lower = {
                     "Screened": res["global_uncertainty"]["lower"].screened.cumulative,
@@ -759,20 +798,155 @@ def render() -> None:
                 layers.append(
                     alt.Chart(df_band)
                     .mark_area(opacity=0.18)
-                    .encode(x=alt.X("date:T", scale=alt.Scale(domain=[domain_min, domain_max])), y="lower:Q", y2="upper:Q")
+                    .encode(
+                        x=alt.X("date:T", scale=alt.Scale(domain=[domain_min, domain_max])),
+                        y="lower:Q",
+                        y2="upper:Q",
+                    )
                 )
 
-            layers.append(base.mark_line().encode(y=alt.Y("value:Q", title="Cumulative")))
-            st.altair_chart(alt.layer(*layers).properties(height=320), use_container_width=True)
+            country_domain = [name for name, _ in country_entries]
+            country_range = [country_color_map.get(name, country_palette[i % len(country_palette)]) for i, name in enumerate(country_domain)]
+
+            countries_line = (
+                alt.Chart(df)
+                .transform_filter(alt.datum.country != "Global")
+                .mark_line()
+                .encode(
+                    x=alt.X("date:T", title="Date", scale=alt.Scale(domain=[domain_min, domain_max])),
+                    y=alt.Y("value:Q", title="Cumulative"),
+                    color=alt.Color(
+                        "country:N",
+                        title="Country",
+                        scale=alt.Scale(domain=country_domain, range=country_range),
+                    ),
+                    tooltip=[
+                        alt.Tooltip("date:T", title="Date", format="%Y-%m-%d"),
+                        alt.Tooltip("country:N", title="Country"),
+                        alt.Tooltip("value:Q", title="Cumulative", format=".1f"),
+                    ],
+                )
+            )
+
+            global_line = (
+                alt.Chart(df)
+                .transform_filter(alt.datum.country == "Global")
+                .mark_line(color=global_line_color, strokeWidth=4)
+                .encode(
+                    x=alt.X("date:T", scale=alt.Scale(domain=[domain_min, domain_max])),
+                    y=alt.Y("value:Q"),
+                    tooltip=[
+                        alt.Tooltip("date:T", title="Date", format="%Y-%m-%d"),
+                        alt.Tooltip("country:N", title="Series"),
+                        alt.Tooltip("value:Q", title="Cumulative", format=".1f"),
+                    ],
+                )
+            )
+
+            layers.extend([countries_line, global_line])
+            st.altair_chart(alt.layer(*layers).properties(height=320), width="stretch")
+
+            # Site activation chart
+            st.markdown("### Site Activation Over Time")
+            global_sites_color = st.color_picker(
+                "Global cumulative active sites line",
+                value=st.session_state.get("adv_global_sites_line_color", "#1b9e77"),
+                key="adv_global_sites_line_color",
+            )
+            monthly_rows = []
+            for r in ok_results:
+                out = r["result"]
+                if not out.primary.active_sites:
+                    continue
+                df_sites = pd.DataFrame(
+                    {
+                        "date": list(out.primary.active_sites.keys()),
+                        "active_sites": list(out.primary.active_sites.values()),
+                    }
+                ).sort_values("date")
+                df_sites["month"] = df_sites["date"].apply(lambda d: date(d.year, d.month, 1))
+                monthly = df_sites.groupby("month", as_index=False)["active_sites"].mean()
+                monthly["country"] = r["country"]
+                monthly_rows.append(monthly)
+
+            if monthly_rows:
+                bars_df = pd.concat(monthly_rows, ignore_index=True)
+                global_monthly = (
+                    bars_df.groupby("month", as_index=False)["active_sites"]
+                    .sum()
+                    .rename(columns={"active_sites": "global_active_sites"})
+                    .sort_values("month")
+                )
+                global_monthly["cumulative_active_sites"] = global_monthly["global_active_sites"].cumsum()
+
+                domain_min = bars_df["month"].min()
+                if res.get("global_lslv"):
+                    domain_max = res["global_lslv"] + pd.Timedelta(days=30)
+                else:
+                    domain_max = bars_df["month"].max()
+
+                bar = (
+                    alt.Chart(bars_df)
+                    .mark_bar(size=18)
+                    .encode(
+                        x=alt.X("month:T", title="Month", scale=alt.Scale(domain=[domain_min, domain_max])),
+                        xOffset=alt.XOffset("country:N"),
+                        y=alt.Y("active_sites:Q", title="Avg Active Sites"),
+                        color=alt.Color(
+                            "country:N",
+                            title="Country",
+                            scale=alt.Scale(domain=country_domain, range=country_range),
+                        ),
+                        tooltip=[
+                            alt.Tooltip("month:T", title="Month", format="%Y-%m"),
+                            alt.Tooltip("country:N", title="Country"),
+                            alt.Tooltip("active_sites:Q", title="Avg Active Sites", format=".1f"),
+                        ],
+                    )
+                )
+
+                line = (
+                    alt.Chart(global_monthly)
+                    .mark_line(color=global_sites_color, strokeWidth=4)
+                    .encode(
+                        x=alt.X("month:T", scale=alt.Scale(domain=[domain_min, domain_max])),
+                        y=alt.Y(
+                            "cumulative_active_sites:Q",
+                            axis=alt.Axis(title="Cumulative Active Sites", orient="right"),
+                        ),
+                        tooltip=[
+                            alt.Tooltip("month:T", title="Month", format="%Y-%m"),
+                            alt.Tooltip("cumulative_active_sites:Q", title="Cumulative Active Sites", format=".1f"),
+                        ],
+                    )
+                )
+
+                chart = alt.layer(bar, line).resolve_scale(y="independent").properties(height=320)
+                st.altair_chart(chart, width="stretch")
+            else:
+                st.info("No site activation data available for selected countries.")
 
         # Country drill-down
         st.markdown("## Country Drill-down")
-        ok_countries = [r for r in res["countries"] if r["status"] == "ok" and r["result"]]
-        if ok_countries:
-            country_names = [r["country"] for r in ok_countries]
-            sel_country = st.selectbox("Country", country_names, key="adv_selected_country")
+        if ok_results:
+            country_names = [r["country"] for r in ok_results]
+            default_country = st.session_state.get("adv_selected_country")
+            if default_country in country_names:
+                default_index = country_names.index(default_country)
+            else:
+                default_index = 0
+            sel_country = st.selectbox(
+                "Country",
+                country_names,
+                index=default_index,
+                key="adv_selected_country",
+            )
             sel_state = st.selectbox("State", ["Screened", "Randomized", "Completed"], key="adv_country_state")
-            country_result = next(r for r in ok_countries if r["country"] == sel_country)
+            country_map = {r["country"]: r for r in ok_results}
+            country_result = country_map.get(sel_country)
+            if not country_result:
+                st.warning("Selected country not available in results. Showing the first available country.")
+                country_result = ok_results[0]
             out = country_result["result"]
 
             series = {
@@ -814,7 +988,7 @@ def render() -> None:
                 .mark_line()
                 .encode(x=alt.X("date:T", scale=alt.Scale(domain=[domain_min, domain_max])), y="value:Q")
             )
-            st.altair_chart(alt.layer(*layers).properties(height=320), use_container_width=True)
+            st.altair_chart(alt.layer(*layers).properties(height=320), width="stretch")
         else:
             st.info("No successful countries to display.")
 
@@ -900,7 +1074,7 @@ def render() -> None:
                 )
                 if view != "World":
                     fig.update_geos(fitbounds="locations", visible=False)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
             with col_pie:
                 st.checkbox("Show pie", key="adv_pie_enabled")
@@ -937,13 +1111,22 @@ def render() -> None:
                             values="pie_value",
                         )
                         if st.session_state["adv_pie_label_mode"] == "Percent":
-                            fig_pie.update_traces(textinfo="percent")
+                            fig_pie.update_traces(
+                                texttemplate="%{percent:.0%}",
+                                hovertemplate="%{label}<br>%{percent:.0%}<extra></extra>",
+                            )
                         elif st.session_state["adv_pie_label_mode"] == "Value":
-                            fig_pie.update_traces(textinfo="value")
+                            fig_pie.update_traces(
+                                texttemplate="%{value:.0f}",
+                                hovertemplate="%{label}<br>%{value:.0f}<extra></extra>",
+                            )
                         else:
-                            fig_pie.update_traces(textinfo="percent+value")
+                            fig_pie.update_traces(
+                                texttemplate="%{percent:.0%}<br>%{value:.0f}",
+                                hovertemplate="%{label}<br>%{percent:.0%}<br>%{value:.0f}<extra></extra>",
+                            )
 
-                        st.plotly_chart(fig_pie, use_container_width=True)
+                        st.plotly_chart(fig_pie, width="stretch")
         else:
             st.info("No map data available (no successful countries).")
 
