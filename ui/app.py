@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import sys
 from pathlib import Path
 import streamlit as st
@@ -48,6 +49,35 @@ mode = st.sidebar.radio(
     index=0,
     key="app_mode",
 )
+
+SIMPLE_MODES = {
+    "Simple Scenario: Simple Scenario: # of Sites Drives Timeline",
+    "Simple Scenario: Timeline Drives # of Sites",
+}
+SIMPLE_SHARED_KEYS = {"save_name", "compare_state"}
+
+
+def _capture_simple_state(session_state: dict) -> dict:
+    snapshot: dict = {}
+    for key, value in session_state.items():
+        if key.startswith(("S1_", "S2_", "S3_", "S4_", "S5_")) or key in SIMPLE_SHARED_KEYS:
+            snapshot[key] = copy.deepcopy(value)
+    return snapshot
+
+
+def _restore_simple_state(session_state: dict, snapshot: dict) -> None:
+    for key, value in snapshot.items():
+        if key not in session_state:
+            session_state[key] = copy.deepcopy(value)
+
+
+previous_mode = st.session_state.get("_last_app_mode")
+if previous_mode in SIMPLE_MODES and mode == "Advanced":
+    st.session_state["_simple_state_snapshot"] = _capture_simple_state(st.session_state)
+elif previous_mode == "Advanced" and mode in SIMPLE_MODES:
+    _restore_simple_state(st.session_state, st.session_state.get("_simple_state_snapshot", {}))
+
+st.session_state["_last_app_mode"] = mode
 
 if mode == "Advanced":
     from ui.app_advanced import render as render_advanced

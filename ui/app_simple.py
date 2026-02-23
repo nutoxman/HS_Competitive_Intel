@@ -248,12 +248,8 @@ def render():
                 for sk in included
             )
             domain_max = _coerce_to_date(latest_lslv + timedelta(days=30))
-            selected_range = st.date_input(
-                "Display date range",
-                value=(domain_min, domain_max),
-                key="compare_date_range",
-                format=DATE_INPUT_FORMAT,
-            )
+            compare_range_key = "compare_date_range"
+            selected_range = st.session_state.get(compare_range_key, (domain_min, domain_max))
             range_start, range_end = _resolve_date_range(selected_range, domain_min, domain_max)
 
             base = alt.Chart(long_df).encode(
@@ -289,6 +285,12 @@ def render():
             )
 
             st.altair_chart(alt.layer(*layers).properties(height=320), width="stretch")
+            st.date_input(
+                "Display date range",
+                value=(range_start, range_end),
+                key=compare_range_key,
+                format=DATE_INPUT_FORMAT,
+            )
 
 
 if __name__ == "__main__":

@@ -835,12 +835,8 @@ def render() -> None:
                 domain_max = _coerce_to_date(res["global_lslv"] + pd.Timedelta(days=30))
             else:
                 domain_max = _coerce_to_date(df["date"].max())
-            selected_range = st.date_input(
-                "Display date range",
-                value=(domain_min, domain_max),
-                key="adv_global_curve_date_range",
-                format=DATE_INPUT_FORMAT,
-            )
+            global_range_key = "adv_global_curve_date_range"
+            selected_range = st.session_state.get(global_range_key, (domain_min, domain_max))
             range_start, range_end = _resolve_date_range(selected_range, domain_min, domain_max)
 
             layers = []
@@ -923,6 +919,12 @@ def render() -> None:
 
             layers.extend([countries_line, global_line])
             st.altair_chart(alt.layer(*layers).properties(height=320), width="stretch")
+            st.date_input(
+                "Display date range",
+                value=(range_start, range_end),
+                key=global_range_key,
+                format=DATE_INPUT_FORMAT,
+            )
 
             # Site activation chart
             st.markdown("### Site Activation Over Time")
@@ -963,12 +965,8 @@ def render() -> None:
                 else:
                     domain_max = _coerce_to_date(bars_df["month"].max())
                 domain_min = _coerce_to_date(domain_min)
-                selected_site_range = st.date_input(
-                    "Display site activation date range",
-                    value=(domain_min, domain_max),
-                    key="adv_site_activation_date_range",
-                    format=DATE_INPUT_FORMAT,
-                )
+                site_range_key = "adv_site_activation_date_range"
+                selected_site_range = st.session_state.get(site_range_key, (domain_min, domain_max))
                 site_range_start, site_range_end = _resolve_date_range(selected_site_range, domain_min, domain_max)
 
                 bar = (
@@ -1018,6 +1016,12 @@ def render() -> None:
 
                 chart = alt.layer(bar, line).resolve_scale(y="independent").properties(height=320)
                 st.altair_chart(chart, width="stretch")
+                st.date_input(
+                    "Display site activation date range",
+                    value=(site_range_start, site_range_end),
+                    key=site_range_key,
+                    format=DATE_INPUT_FORMAT,
+                )
             else:
                 st.info("No site activation data available for selected countries.")
 
@@ -1056,12 +1060,8 @@ def render() -> None:
             layers = []
             domain_min = _coerce_to_date(df["date"].min())
             domain_max = _coerce_to_date(out.timelines.completed_lslv + pd.Timedelta(days=30))
-            selected_country_range = st.date_input(
-                "Display country date range",
-                value=(domain_min, domain_max),
-                key="adv_country_curve_date_range",
-                format=DATE_INPUT_FORMAT,
-            )
+            country_range_key = "adv_country_curve_date_range"
+            selected_country_range = st.session_state.get(country_range_key, (domain_min, domain_max))
             country_range_start, country_range_end = _resolve_date_range(
                 selected_country_range, domain_min, domain_max
             )
@@ -1112,6 +1112,12 @@ def render() -> None:
                 )
             )
             st.altair_chart(alt.layer(*layers).properties(height=320), width="stretch")
+            st.date_input(
+                "Display country date range",
+                value=(country_range_start, country_range_end),
+                key=country_range_key,
+                format=DATE_INPUT_FORMAT,
+            )
         else:
             st.info("No successful countries to display.")
 

@@ -13,6 +13,7 @@ from engine.models.settings import GlobalSettings
 
 DATE_DISPLAY_FORMAT = "%d-%b-%Y"
 DATE_INPUT_FORMAT = "DD-MM-YYYY"
+TABLE_FONT_COLOR = "#09CFEA"
 
 
 def _format_number(value):
@@ -76,6 +77,26 @@ def _one_year_after(d: date) -> date:
         return d.replace(month=2, day=28, year=d.year + 1)
 
 
+def _render_table_color_css(scenario_key: str) -> None:
+    st.markdown(
+        f"""
+<style>
+  .st-key-{scenario_key}_rr_editor [data-testid="stDataEditor"] th,
+  .st-key-{scenario_key}_rr_editor [data-testid="stDataEditor"] td,
+  .st-key-{scenario_key}_rr_editor [data-testid="stDataEditor"] input,
+  .st-key-{scenario_key}_rr_editor [data-testid="stDataEditor"] textarea,
+  .st-key-{scenario_key}_sar_editor [data-testid="stDataEditor"] th,
+  .st-key-{scenario_key}_sar_editor [data-testid="stDataEditor"] td,
+  .st-key-{scenario_key}_sar_editor [data-testid="stDataEditor"] input,
+  .st-key-{scenario_key}_sar_editor [data-testid="stDataEditor"] textarea {{
+    color: {TABLE_FONT_COLOR} !important;
+  }}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+
 def _milestone_dates(fsfv: date, lsfv: date) -> list[date]:
     duration = (lsfv - fsfv).days
     milestones = []
@@ -103,7 +124,7 @@ def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
         st.session_state[f"{scenario_key}_goal_n"] = 100
         st.session_state[f"{scenario_key}_screen_fail_rate"] = 0.2
         st.session_state[f"{scenario_key}_discontinuation_rate"] = 0.1
-        st.session_state[f"{scenario_key}_period_type"] = "Randomized"
+        st.session_state[f"{scenario_key}_period_type"] = "Screened"
         st.session_state[f"{scenario_key}_simple_scenario"] = "Simple Scenario: Simple Scenario: # of Sites Drives Timeline"
         st.session_state[f"{scenario_key}_driver"] = "Fixed Sites"
         st.session_state[f"{scenario_key}_fsfv"] = today
@@ -126,7 +147,11 @@ def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
     if global_scenario:
         st.session_state[f"{scenario_key}_simple_scenario"] = global_scenario
         simple_scenario = global_scenario
-        st.caption(f"Scenario mode: {simple_scenario}")
+        mode_label = {
+            "Simple Scenario: Simple Scenario: # of Sites Drives Timeline": "Simple Scenario: # of Sites Drives Timeline",
+            "Simple Scenario: Timeline Drives # of Sites": "Simple Scenario: Timeline Drives # of Sites",
+        }.get(simple_scenario, simple_scenario)
+        st.caption(mode_label)
     else:
         simple_scenario = st.selectbox(
             "Simple Scenario",
@@ -143,7 +168,7 @@ def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
         driver = "Fixed Timeline"
 
     st.session_state[f"{scenario_key}_driver"] = driver
-    st.caption(f"Driver: {driver}")
+    _render_table_color_css(scenario_key)
 
     col1, col2, col3 = st.columns(3)
 
@@ -362,10 +387,20 @@ def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
 def render_results(out, scenario_key: str):
     st.success("Run complete.")
 
+    total_randomized = max(out.states.randomized.cumulative.values()) if out.states.randomized.cumulative else 0.0
+    total_screened = max(out.states.screened.cumulative.values()) if out.states.screened.cumulative else 0.0
+    duration_days = max(1, (out.primary.lsfv - out.primary.fsfv).days)
+    site_months = out.primary.sites * (duration_days / GlobalSettings().days_per_month)
+    avg_randomized_per_site_month = (total_randomized / site_months) if site_months > 0 else 0.0
+    avg_screened_per_site_month = (total_screened / site_months) if site_months > 0 else 0.0
+
     st.markdown(
         """
 <style>
-  div[data-testid="stMetric"] {
+  div[data-testid="stMetric"],
+  div[data-testid="stMetricLabel"] *,
+  div[data-testid="stMetricValue"] *,
+  div[data-testid="stMetricDelta"] * {
     font-size: 10pt;
   }
 </style>
@@ -373,7 +408,7 @@ def render_results(out, scenario_key: str):
         unsafe_allow_html=True,
     )
 
-    st.markdown("## Summary")
+    st.markdown("<p style='font-size:10pt;font-weight:700;'>Summary</p>", unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns(3)
 
@@ -387,17 +422,19 @@ def render_results(out, scenario_key: str):
             st.metric("Solved Sites", _format_number(out.solve.solved_sites))
         if out.solve.solved_lsfv is not None:
             st.metric("Solved LSFV", _format_date(out.solve.solved_lsfv))
+        st.metric("Avg Randomized/site/month", _format_number(avg_randomized_per_site_month))
+        st.metric("Avg Screened/site/month", _format_number(avg_screened_per_site_month))
 
     with col3:
         fsfv = out.primary.fsfv
         fslv = out.timelines.completed_fsfv
         lsfv = out.primary.lsfv
         lslv = out.timelines.completed_lslv
-        st.write("**Timelines**")
-        st.write(f"FSFV: {_format_date(fsfv)}")
-        st.write(f"FSLV: {_format_date(fslv)}")
-        st.write(f"LSFV: {_format_date(lsfv)}")
-        st.write(f"LSLV: {_format_date(lslv)}")
+        st.markdown("<p style='font-size:10pt;font-weight:700;margin:0;'>Timelines</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='font-size:10pt;margin:0.2rem 0;'>FSFV: {_format_date(fsfv)}</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='font-size:10pt;margin:0.2rem 0;'>FSLV: {_format_date(fslv)}</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='font-size:10pt;margin:0.2rem 0;'>LSFV: {_format_date(lsfv)}</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='font-size:10pt;margin:0.2rem 0;'>LSLV: {_format_date(lslv)}</p>", unsafe_allow_html=True)
 
     # Cumulative chart (with optional uncertainty bands)
     def to_df(series_dict):
@@ -427,12 +464,8 @@ def render_results(out, scenario_key: str):
 
     domain_min = _coerce_to_date(df_long["date"].min()) if not df_long.empty else out.timelines.completed_fsfv
     domain_max = _coerce_to_date(out.timelines.completed_lslv + timedelta(days=30))
-    selected_range = st.date_input(
-        "Display date range",
-        value=(domain_min, domain_max),
-        key=f"{scenario_key}_chart_date_range",
-        format=DATE_INPUT_FORMAT,
-    )
+    chart_range_key = f"{scenario_key}_chart_date_range"
+    selected_range = st.session_state.get(chart_range_key, (domain_min, domain_max))
     range_start, range_end = _resolve_date_range(selected_range, domain_min, domain_max)
 
     base = alt.Chart(df_long).encode(
@@ -500,6 +533,12 @@ def render_results(out, scenario_key: str):
         chart = chart.resolve_scale(y="independent")
 
     st.altair_chart(chart, width="stretch")
+    st.date_input(
+        "Display date range",
+        value=(range_start, range_end),
+        key=chart_range_key,
+        format=DATE_INPUT_FORMAT,
+    )
 
     st.markdown("### Bucket summary (Monthly, Randomized)")
     bucket_df = pd.DataFrame(out.buckets["month"]["Randomized"]).rename(
