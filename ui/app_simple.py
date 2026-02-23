@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 import streamlit as st
 
@@ -14,12 +15,50 @@ from engine.models.settings import GlobalSettings
 from ui.components import render_scenario_inputs, render_results
 
 
+FIXED_SITES_MODE = "Simple Scenario: Simple Scenario: # of Sites Drives Timeline"
+FIXED_TIMELINE_MODE = "Simple Scenario: Timeline Drives # of Sites"
+DATE_AXIS_FORMAT = "%d-%b-%Y"
+DATE_INPUT_FORMAT = "DD-MM-YYYY"
+
+
+def _coerce_to_date(value):
+    if isinstance(value, date):
+        return value
+    if hasattr(value, "date"):
+        return value.date()
+    raise TypeError(f"Unsupported date value: {value!r}")
+
+
+def _resolve_date_range(selection, default_start: date, default_end: date) -> tuple[date, date]:
+    if isinstance(selection, tuple) and len(selection) == 2:
+        start, end = selection
+    elif isinstance(selection, list) and len(selection) == 2:
+        start, end = selection
+    elif isinstance(selection, date):
+        start = end = selection
+    else:
+        start, end = default_start, default_end
+
+    start = _coerce_to_date(start)
+    end = _coerce_to_date(end)
+    if end < start:
+        start, end = end, start
+    return start, end
 
 
 def render():
-    st.title("Recruitment Scenario Planner — Simple Mode")
+    selected_mode = st.session_state.get("simple_mode_scenario")
+    if selected_mode == FIXED_TIMELINE_MODE:
+        page_title = "Simple Mode: Timeline Drives # of Sites"
+    else:
+        page_title = "Simple Mode: # of Sites Drives Timeline"
+    st.markdown(
+        f"<p style='font-size:12pt;font-weight:600;margin:0 0 1rem 0;'>{page_title}</p>",
+        unsafe_allow_html=True,
+    )
 
     settings = GlobalSettings()
+    copy_controls_visible = any(f"S{i}_result" in st.session_state for i in range(1, 6))
 
     from ui.persistence import load_into_session_state, from_json_bytes
 
@@ -38,53 +77,55 @@ def render():
     for i, tab in enumerate(tabs[:5], start=1):
         with tab:
             scenario_key = f"S{i}"
-            # Scenario copy controls
-            copy_from = st.selectbox(
-                "Copy inputs from",
-                ["(none)", "S1", "S2", "S3", "S4", "S5"],
-                index=0,
-                key=f"{scenario_key}_copy_from",
-            )
-            if st.button("Copy", key=f"{scenario_key}_copy_btn"):
-                if copy_from != "(none)" and copy_from != scenario_key:
-                    # Copy known session_state keys
-                    keys_to_copy = [
-                        "goal_type",
-                        "goal_n",
-                        "screen_fail_rate",
-                        "discontinuation_rate",
-                        "period_type",
-                        "simple_scenario",
-                        "driver",
-                        "fsfv",
-                        "lsfv",
-                        "sites",
-                        "lag_sr_days",
-                        "lag_rc_days",
-                        "sar_pct",
-                        "rr_pct",
-                        "uncertainty_enabled",
-                        "uncertainty_lower_pct",
-                        "uncertainty_upper_pct",
-                    ]
-                    for k in keys_to_copy:
-                        src = f"{copy_from}_{k}"
-                        dst = f"{scenario_key}_{k}"
-                        if src in st.session_state:
-                            st.session_state[dst] = st.session_state[src]
+            # Scenario copy controls (shown only after at least one scenario has been run)
+            if copy_controls_visible:
+                copy_from = st.selectbox(
+                    "Copy inputs from:",
+                    ["(none)", "S1", "S2", "S3", "S4", "S5"],
+                    index=0,
+                    key=f"{scenario_key}_copy_from",
+                    width=96,
+                )
+                if st.button("Copy", key=f"{scenario_key}_copy_btn"):
+                    if copy_from != "(none)" and copy_from != scenario_key:
+                        # Copy known session_state keys
+                        keys_to_copy = [
+                            "goal_type",
+                            "goal_n",
+                            "screen_fail_rate",
+                            "discontinuation_rate",
+                            "period_type",
+                            "simple_scenario",
+                            "driver",
+                            "fsfv",
+                            "lsfv",
+                            "sites",
+                            "lag_sr_days",
+                            "lag_rc_days",
+                            "sar_pct",
+                            "rr_pct",
+                            "uncertainty_enabled",
+                            "uncertainty_lower_pct",
+                            "uncertainty_upper_pct",
+                        ]
+                        for k in keys_to_copy:
+                            src = f"{copy_from}_{k}"
+                            dst = f"{scenario_key}_{k}"
+                            if src in st.session_state:
+                                st.session_state[dst] = st.session_state[src]
 
-                    # Clear results (force rerun)
-                    st.session_state.pop(f"{scenario_key}_result", None)
+                        # Clear results (force rerun)
+                        st.session_state.pop(f"{scenario_key}_result", None)
 
-                    # Also reset editor widgets so Streamlit rebinds cleanly
-                    st.session_state.pop(f"{scenario_key}_sar_editor", None)
-                    st.session_state.pop(f"{scenario_key}_rr_editor", None)
+                        # Also reset editor widgets so Streamlit rebinds cleanly
+                        st.session_state.pop(f"{scenario_key}_sar_editor", None)
+                        st.session_state.pop(f"{scenario_key}_rr_editor", None)
 
-                    st.success(f"Copied inputs from {copy_from} → {scenario_key}")
-                elif copy_from == scenario_key:
-                    st.info("Pick a different scenario to copy from.")
-                else:
-                    st.info("Select a scenario to copy from.")
+                        st.success(f"Copied inputs from {copy_from} → {scenario_key}")
+                    elif copy_from == scenario_key:
+                        st.info("Pick a different scenario to copy from.")
+                    else:
+                        st.info("Select a scenario to copy from.")
 
             inputs = render_scenario_inputs(scenario_key)
 
@@ -201,8 +242,27 @@ def render():
             long_df["upper"] = upper_vals
             long_df["uncertainty_enabled"] = enabled_vals
 
+            domain_min = _coerce_to_date(long_df["date"].min())
+            latest_lslv = max(
+                st.session_state[f"{sk}_result"].timelines.completed_lslv
+                for sk in included
+            )
+            domain_max = _coerce_to_date(latest_lslv + timedelta(days=30))
+            selected_range = st.date_input(
+                "Display date range",
+                value=(domain_min, domain_max),
+                key="compare_date_range",
+                format=DATE_INPUT_FORMAT,
+            )
+            range_start, range_end = _resolve_date_range(selected_range, domain_min, domain_max)
+
             base = alt.Chart(long_df).encode(
-                x=alt.X("date:T", title="Date"),
+                x=alt.X(
+                    "date:T",
+                    title="Date",
+                    scale=alt.Scale(domain=[range_start, range_end]),
+                    axis=alt.Axis(format=DATE_AXIS_FORMAT),
+                ),
                 color=alt.Color("scenario:N", title="Scenario"),
             )
 
@@ -220,6 +280,11 @@ def render():
             layers.append(
                 base.mark_line().encode(
                     y=alt.Y("value:Q", title="Cumulative"),
+                    tooltip=[
+                        alt.Tooltip("date:T", title="Date", format=DATE_AXIS_FORMAT),
+                        alt.Tooltip("scenario:N", title="Scenario"),
+                        alt.Tooltip("value:Q", title="Cumulative", format=".1f"),
+                    ],
                 )
             )
 

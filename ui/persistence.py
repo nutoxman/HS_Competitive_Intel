@@ -84,7 +84,10 @@ def load_into_session_state(payload: dict, session_state: dict) -> None:
     scenarios = payload.get("scenarios", {})
     for sk, scenario in scenarios.items():
         for k, v in scenario.items():
-            session_state[f"{sk}_{k}"] = _str_to_date(v)
+            parsed = _str_to_date(v)
+            if k == "period_type" and parsed == "Completed":
+                parsed = "Randomized"
+            session_state[f"{sk}_{k}"] = parsed
 
         # reset editor widgets so Streamlit rebinds
         session_state.pop(f"{sk}_sar_editor", None)
@@ -151,7 +154,10 @@ def dump_advanced_state(session_state: dict) -> dict:
 def load_advanced_state(payload: dict, session_state: dict) -> None:
     adv = payload.get("advanced", {})
     for k, v in adv.items():
-        session_state[k] = _restore_dates(v)
+        parsed = _restore_dates(v)
+        if k == "adv_period_type" and parsed == "Completed":
+            parsed = "Randomized"
+        session_state[k] = parsed
 
     # Clear results and editor state
     session_state.pop("adv_results", None)

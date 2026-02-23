@@ -13,6 +13,12 @@ st.set_page_config(page_title="Recruitment Scenario Planner", layout="wide")
 st.markdown(
     """
 <style>
+  html,
+  body,
+  div[data-testid="stAppViewContainer"],
+  section[data-testid="stSidebar"] {
+    font-size: 10pt !important;
+  }
   div[data-testid="stDataFrame"] th,
   div[data-testid="stDataFrame"] td,
   div[data-testid="stDataEditor"] th,
@@ -33,7 +39,7 @@ st.markdown(
 
 st.sidebar.title("Mode")
 mode = st.sidebar.radio(
-    "Select mode",
+    "Select one",
     [
         "Simple Scenario: Simple Scenario: # of Sites Drives Timeline",
         "Simple Scenario: Timeline Drives # of Sites",

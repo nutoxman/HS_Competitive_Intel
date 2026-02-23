@@ -22,6 +22,8 @@ from ui.persistence import dump_advanced_state, from_json_bytes, load_advanced_s
 
 
 COUNTRY_DATA_PATH = "data/un_members_m49.csv"
+DATE_DISPLAY_FORMAT = "%d-%b-%Y"
+DATE_INPUT_FORMAT = "DD-MM-YYYY"
 
 
 @st.cache_data(show_spinner=False)
@@ -58,7 +60,50 @@ def _format_dataframe_numbers(df: pd.DataFrame) -> pd.DataFrame:
     return df.applymap(fmt)
 
 
+def _format_date(value):
+    if isinstance(value, date):
+        return value.strftime(DATE_DISPLAY_FORMAT)
+    return value
+
+
+def _format_dataframe_dates(df: pd.DataFrame) -> pd.DataFrame:
+    return df.applymap(_format_date)
+
+
+def _coerce_to_date(value):
+    if isinstance(value, date):
+        return value
+    if hasattr(value, "date"):
+        return value.date()
+    raise TypeError(f"Unsupported date value: {value!r}")
+
+
+def _resolve_date_range(selection, default_start: date, default_end: date) -> tuple[date, date]:
+    if isinstance(selection, tuple) and len(selection) == 2:
+        start, end = selection
+    elif isinstance(selection, list) and len(selection) == 2:
+        start, end = selection
+    elif isinstance(selection, date):
+        start = end = selection
+    else:
+        start, end = default_start, default_end
+
+    start = _coerce_to_date(start)
+    end = _coerce_to_date(end)
+    if end < start:
+        start, end = end, start
+    return start, end
+
+
+def _one_year_after(d: date) -> date:
+    try:
+        return d.replace(year=d.year + 1)
+    except ValueError:
+        return d.replace(month=2, day=28, year=d.year + 1)
+
+
 def _init_defaults() -> None:
+    today = date.today()
     defaults = {
         "adv_goal_type": "Randomized",
         "adv_goal_n": 100,
@@ -67,12 +112,12 @@ def _init_defaults() -> None:
         "adv_period_type": "Randomized",
         "adv_driver": "Fixed Timeline",
         "adv_lag_sr_days": 14,
-        "adv_lag_rc_days": 30,
+        "adv_lag_rc_days": 60,
         "adv_uncertainty_enabled": False,
         "adv_uncertainty_lower_pct": 10.0,
         "adv_uncertainty_upper_pct": 10.0,
-        "adv_global_fsfv": date(2026, 1, 1),
-        "adv_global_lsfv": date(2026, 6, 1),
+        "adv_global_fsfv": today,
+        "adv_global_lsfv": _one_year_after(today),
         "adv_global_sites": 10,
         "adv_global_sar_pct": [20, 40, 60, 80, 100, 100],
         "adv_global_rr_pct": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
@@ -91,6 +136,9 @@ def _init_defaults() -> None:
 
     for k, v in defaults.items():
         st.session_state.setdefault(k, v)
+
+    if st.session_state.get("adv_period_type") not in {"Screened", "Randomized"}:
+        st.session_state["adv_period_type"] = "Randomized"
 
     st.session_state["adv_initialized"] = True
 
@@ -285,21 +333,30 @@ def render() -> None:
         except Exception as e:
             st.session_state.pop("_adv_pending_load_payload", None)
             st.error(f"Failed to apply loaded file: {e}")
+
+    if st.session_state.get("adv_period_type") not in {"Screened", "Randomized"}:
+        st.session_state["adv_period_type"] = "Randomized"
+
     settings = GlobalSettings()
     countries_df = load_countries()
 
     with st.expander("Global Inputs", expanded=True):
         gcol1, gcol2, gcol3 = st.columns(3)
         with gcol1:
-            st.selectbox("Goal Type", ["Randomized", "Completed"], key="adv_goal_type")
+            st.selectbox(
+                "Solve For",
+                ["Randomized", "Completed"],
+                key="adv_goal_type",
+                format_func=lambda v: {"Randomized": "Total Randomized", "Completed": "Total Completed"}[v],
+            )
             st.number_input("Goal N (global)", min_value=1, step=1, key="adv_goal_n")
             st.slider("Screen fail rate", 0.0, 0.99, key="adv_screen_fail_rate")
             st.slider("Discontinuation rate", 0.0, 0.99, key="adv_discontinuation_rate")
 
         with gcol2:
             st.selectbox(
-                "Recruitment period type (primary)",
-                ["Screened", "Randomized", "Completed"],
+                "Recruitment Rate type (primary)",
+                ["Screened", "Randomized"],
                 key="adv_period_type",
             )
             st.selectbox("Driver", ["Fixed Sites", "Fixed Timeline"], key="adv_driver")
@@ -317,9 +374,9 @@ def render() -> None:
             )
 
         with gcol3:
-            st.date_input("Default FSFV", key="adv_global_fsfv")
+            st.date_input("Default FSFV", key="adv_global_fsfv", format=DATE_INPUT_FORMAT)
             if st.session_state["adv_driver"] == "Fixed Timeline":
-                st.date_input("Default LSFV", key="adv_global_lsfv")
+                st.date_input("Default LSFV", key="adv_global_lsfv", format=DATE_INPUT_FORMAT)
             else:
                 st.number_input("Default Sites", min_value=1, step=1, key="adv_global_sites")
 
@@ -331,7 +388,6 @@ def render() -> None:
         rr_label_map = {
             "Screened": "screened",
             "Randomized": "randomized",
-            "Completed": "completed",
         }
         rr_label = rr_label_map.get(st.session_state["adv_period_type"], "randomized")
         st.markdown(f"### Global Defaults — # of subjects {rr_label}/site/month")
@@ -416,10 +472,10 @@ def render() -> None:
             "Country": st.column_config.TextColumn(disabled=True),
             "Region": st.column_config.TextColumn(disabled=True),
             "Subregion": st.column_config.TextColumn(disabled=True),
-            "FSFV": st.column_config.DateColumn(),
+            "FSFV": st.column_config.DateColumn(format=DATE_INPUT_FORMAT),
         }
         if driver == "Fixed Timeline":
-            column_config["LSFV"] = st.column_config.DateColumn()
+            column_config["LSFV"] = st.column_config.DateColumn(format=DATE_INPUT_FORMAT)
         else:
             column_config["Sites"] = st.column_config.NumberColumn(min_value=1, step=1)
 
@@ -439,7 +495,7 @@ def render() -> None:
     if selected and not country_df.empty:
         fsfvs = [row["FSFV"] for _, row in country_df.iterrows() if isinstance(row["FSFV"], date)]
         if fsfvs:
-            st.info(f"Derived global FSFV (earliest): {min(fsfvs).isoformat()}")
+            st.info(f"Derived global FSFV (earliest): {_format_date(min(fsfvs))}")
 
     if errors:
         st.error("Please fix the following before running:")
@@ -666,7 +722,7 @@ def render() -> None:
                 return "unreachable"
             val = getattr(solve, field, None)
             if isinstance(val, date):
-                return val.isoformat()
+                return _format_date(val)
             return val
 
         rows = []
@@ -701,12 +757,14 @@ def render() -> None:
                     "Warning": r["warning"],
                 })
 
-        summary_df = _format_dataframe_numbers(pd.DataFrame(rows))
+        summary_df = pd.DataFrame(rows)
+        summary_df = _format_dataframe_dates(summary_df)
+        summary_df = _format_dataframe_numbers(summary_df)
         st.dataframe(summary_df, width="stretch")
 
         st.markdown("## Global Roll-up")
         if res["global_lslv"]:
-            st.write(f"Global LSLV (latest across countries): {res['global_lslv']}")
+            st.write(f"Global LSLV (latest across countries): {_format_date(res['global_lslv'])}")
         else:
             st.info("No global LSLV available (no successful countries).")
 
@@ -772,11 +830,18 @@ def render() -> None:
                 rows.append({"date": d, "value": v, "country": "Global"})
 
             df = pd.DataFrame(rows).sort_values("date")
-            domain_min = df["date"].min()
+            domain_min = _coerce_to_date(df["date"].min())
             if res.get("global_lslv"):
-                domain_max = res["global_lslv"] + pd.Timedelta(days=30)
+                domain_max = _coerce_to_date(res["global_lslv"] + pd.Timedelta(days=30))
             else:
-                domain_max = df["date"].max()
+                domain_max = _coerce_to_date(df["date"].max())
+            selected_range = st.date_input(
+                "Display date range",
+                value=(domain_min, domain_max),
+                key="adv_global_curve_date_range",
+                format=DATE_INPUT_FORMAT,
+            )
+            range_start, range_end = _resolve_date_range(selected_range, domain_min, domain_max)
 
             layers = []
             if res.get("global_uncertainty"):
@@ -799,7 +864,11 @@ def render() -> None:
                     alt.Chart(df_band)
                     .mark_area(opacity=0.18)
                     .encode(
-                        x=alt.X("date:T", scale=alt.Scale(domain=[domain_min, domain_max])),
+                        x=alt.X(
+                            "date:T",
+                            scale=alt.Scale(domain=[range_start, range_end]),
+                            axis=alt.Axis(format=DATE_DISPLAY_FORMAT),
+                        ),
                         y="lower:Q",
                         y2="upper:Q",
                     )
@@ -813,7 +882,12 @@ def render() -> None:
                 .transform_filter(alt.datum.country != "Global")
                 .mark_line()
                 .encode(
-                    x=alt.X("date:T", title="Date", scale=alt.Scale(domain=[domain_min, domain_max])),
+                    x=alt.X(
+                        "date:T",
+                        title="Date",
+                        scale=alt.Scale(domain=[range_start, range_end]),
+                        axis=alt.Axis(format=DATE_DISPLAY_FORMAT),
+                    ),
                     y=alt.Y("value:Q", title="Cumulative"),
                     color=alt.Color(
                         "country:N",
@@ -821,7 +895,7 @@ def render() -> None:
                         scale=alt.Scale(domain=country_domain, range=country_range),
                     ),
                     tooltip=[
-                        alt.Tooltip("date:T", title="Date", format="%Y-%m-%d"),
+                        alt.Tooltip("date:T", title="Date", format=DATE_DISPLAY_FORMAT),
                         alt.Tooltip("country:N", title="Country"),
                         alt.Tooltip("value:Q", title="Cumulative", format=".1f"),
                     ],
@@ -833,10 +907,14 @@ def render() -> None:
                 .transform_filter(alt.datum.country == "Global")
                 .mark_line(color=global_line_color, strokeWidth=4)
                 .encode(
-                    x=alt.X("date:T", scale=alt.Scale(domain=[domain_min, domain_max])),
+                    x=alt.X(
+                        "date:T",
+                        scale=alt.Scale(domain=[range_start, range_end]),
+                        axis=alt.Axis(format=DATE_DISPLAY_FORMAT),
+                    ),
                     y=alt.Y("value:Q"),
                     tooltip=[
-                        alt.Tooltip("date:T", title="Date", format="%Y-%m-%d"),
+                        alt.Tooltip("date:T", title="Date", format=DATE_DISPLAY_FORMAT),
                         alt.Tooltip("country:N", title="Series"),
                         alt.Tooltip("value:Q", title="Cumulative", format=".1f"),
                     ],
@@ -881,15 +959,28 @@ def render() -> None:
 
                 domain_min = bars_df["month"].min()
                 if res.get("global_lslv"):
-                    domain_max = res["global_lslv"] + pd.Timedelta(days=30)
+                    domain_max = _coerce_to_date(res["global_lslv"] + pd.Timedelta(days=30))
                 else:
-                    domain_max = bars_df["month"].max()
+                    domain_max = _coerce_to_date(bars_df["month"].max())
+                domain_min = _coerce_to_date(domain_min)
+                selected_site_range = st.date_input(
+                    "Display site activation date range",
+                    value=(domain_min, domain_max),
+                    key="adv_site_activation_date_range",
+                    format=DATE_INPUT_FORMAT,
+                )
+                site_range_start, site_range_end = _resolve_date_range(selected_site_range, domain_min, domain_max)
 
                 bar = (
                     alt.Chart(bars_df)
                     .mark_bar(size=18)
                     .encode(
-                        x=alt.X("month:T", title="Month", scale=alt.Scale(domain=[domain_min, domain_max])),
+                        x=alt.X(
+                            "month:T",
+                            title="Month",
+                            scale=alt.Scale(domain=[site_range_start, site_range_end]),
+                            axis=alt.Axis(format=DATE_DISPLAY_FORMAT),
+                        ),
                         xOffset=alt.XOffset("country:N"),
                         y=alt.Y("active_sites:Q", title="Avg Active Sites"),
                         color=alt.Color(
@@ -898,7 +989,7 @@ def render() -> None:
                             scale=alt.Scale(domain=country_domain, range=country_range),
                         ),
                         tooltip=[
-                            alt.Tooltip("month:T", title="Month", format="%Y-%m"),
+                            alt.Tooltip("month:T", title="Month", format=DATE_DISPLAY_FORMAT),
                             alt.Tooltip("country:N", title="Country"),
                             alt.Tooltip("active_sites:Q", title="Avg Active Sites", format=".1f"),
                         ],
@@ -909,13 +1000,17 @@ def render() -> None:
                     alt.Chart(global_monthly)
                     .mark_line(color=global_sites_color, strokeWidth=4)
                     .encode(
-                        x=alt.X("month:T", scale=alt.Scale(domain=[domain_min, domain_max])),
+                        x=alt.X(
+                            "month:T",
+                            scale=alt.Scale(domain=[site_range_start, site_range_end]),
+                            axis=alt.Axis(format=DATE_DISPLAY_FORMAT),
+                        ),
                         y=alt.Y(
                             "cumulative_active_sites:Q",
                             axis=alt.Axis(title="Cumulative Active Sites", orient="right"),
                         ),
                         tooltip=[
-                            alt.Tooltip("month:T", title="Month", format="%Y-%m"),
+                            alt.Tooltip("month:T", title="Month", format=DATE_DISPLAY_FORMAT),
                             alt.Tooltip("cumulative_active_sites:Q", title="Cumulative Active Sites", format=".1f"),
                         ],
                     )
@@ -959,8 +1054,17 @@ def render() -> None:
             df["state"] = sel_state
 
             layers = []
-            domain_min = df["date"].min()
-            domain_max = out.timelines.completed_lslv + pd.Timedelta(days=30)
+            domain_min = _coerce_to_date(df["date"].min())
+            domain_max = _coerce_to_date(out.timelines.completed_lslv + pd.Timedelta(days=30))
+            selected_country_range = st.date_input(
+                "Display country date range",
+                value=(domain_min, domain_max),
+                key="adv_country_curve_date_range",
+                format=DATE_INPUT_FORMAT,
+            )
+            country_range_start, country_range_end = _resolve_date_range(
+                selected_country_range, domain_min, domain_max
+            )
             if country_result["uncertainty"]:
                 lower = {
                     "Screened": country_result["uncertainty"]["lower_states"].screened.cumulative,
@@ -980,13 +1084,32 @@ def render() -> None:
                 layers.append(
                     alt.Chart(df_band)
                     .mark_area(opacity=0.18)
-                    .encode(x=alt.X("date:T", scale=alt.Scale(domain=[domain_min, domain_max])), y="lower:Q", y2="upper:Q")
+                    .encode(
+                        x=alt.X(
+                            "date:T",
+                            scale=alt.Scale(domain=[country_range_start, country_range_end]),
+                            axis=alt.Axis(format=DATE_DISPLAY_FORMAT),
+                        ),
+                        y="lower:Q",
+                        y2="upper:Q",
+                    )
                 )
 
             layers.append(
                 alt.Chart(df)
                 .mark_line()
-                .encode(x=alt.X("date:T", scale=alt.Scale(domain=[domain_min, domain_max])), y="value:Q")
+                .encode(
+                    x=alt.X(
+                        "date:T",
+                        scale=alt.Scale(domain=[country_range_start, country_range_end]),
+                        axis=alt.Axis(format=DATE_DISPLAY_FORMAT),
+                    ),
+                    y="value:Q",
+                    tooltip=[
+                        alt.Tooltip("date:T", title="Date", format=DATE_DISPLAY_FORMAT),
+                        alt.Tooltip("value:Q", title="Cumulative", format=".1f"),
+                    ],
+                )
             )
             st.altair_chart(alt.layer(*layers).properties(height=320), width="stretch")
         else:

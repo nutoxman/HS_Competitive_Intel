@@ -15,8 +15,17 @@ from reportlab.lib.utils import ImageReader
 from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 
+DATE_DISPLAY_FORMAT = "%d-%b-%Y"
+
+
 def _max_cumulative(series: dict) -> float:
     return max(series.values()) if series else 0.0
+
+
+def _format_date(value):
+    if isinstance(value, date):
+        return value.strftime(DATE_DISPLAY_FORMAT)
+    return value
 
 
 def _format_number(value):
@@ -148,6 +157,7 @@ def _build_global_chart(global_states, global_uncertainty, state: str) -> bytes 
         margin=dict(l=20, r=20, t=40, b=20),
         height=300,
     )
+    fig.update_xaxes(tickformat=DATE_DISPLAY_FORMAT)
 
     return _fig_to_png(fig)
 
@@ -170,7 +180,7 @@ def build_advanced_pdf(res: dict, session_state: dict, countries_df: pd.DataFram
     ok = [c for c in countries if c.get("status") == "ok"]
 
     global_lslv = res.get("global_lslv")
-    global_lslv_str = global_lslv.isoformat() if isinstance(global_lslv, date) else "N/A"
+    global_lslv_str = _format_date(global_lslv) if isinstance(global_lslv, date) else "N/A"
 
     exec_text = (
         f"Driver: {driver}. Goal: {goal_type} = {goal_n}. "
@@ -196,8 +206,8 @@ def build_advanced_pdf(res: dict, session_state: dict, countries_df: pd.DataFram
             if isinstance(solved_lsfv, date):
                 lsfvs.append(solved_lsfv)
 
-    global_fsfv = min(fsfvs).isoformat() if fsfvs else "N/A"
-    global_lsfv = max(lsfvs).isoformat() if lsfvs else "N/A"
+    global_fsfv = _format_date(min(fsfvs)) if fsfvs else "N/A"
+    global_lsfv = _format_date(max(lsfvs)) if lsfvs else "N/A"
 
     timeline_table = Table(
         [
@@ -239,8 +249,8 @@ def build_advanced_pdf(res: dict, session_state: dict, countries_df: pd.DataFram
                     _format_number(out.targets.randomized),
                     _format_number(out.targets.completed),
                     out.solve.solved_sites or "",
-                    out.solve.solved_lsfv.isoformat() if out.solve.solved_lsfv else "",
-                    out.timelines.completed_lslv.isoformat() if out.timelines.completed_lslv else "",
+                    _format_date(out.solve.solved_lsfv) if out.solve.solved_lsfv else "",
+                    _format_date(out.timelines.completed_lslv) if out.timelines.completed_lslv else "",
                     r.get("status"),
                 ]
             )
