@@ -49,41 +49,69 @@ Equivalent command:
 .venv/bin/pytest
 ```
 
+## Latest Enhancements
+
+- Canonical simple mode label is now `Simple Scenario: # of Sites Drives Timeline` (legacy saved label still loads).
+- Simple mode inputs persist when switching to `Advanced` and back.
+- The two simple drivers are isolated from each other (independent values per mode).
+- Scenario input headers are dynamic by selected driver: `Scenario Sx Inputs: # of Sites Drives Timeline` and `Scenario Sx Inputs: Timeline Drives # of Sites`.
+- Input layout in simple mode is now mode-specific with a 4-column arrangement.
+- `Recruitment Rate type (primary)` defaults to `Screened` for new simple scenarios.
+- RR and SAR input table text color is `#09CFEA`.
+- Summary typography is standardized to 10pt, and `Avg Randomized/site/month` plus `Avg Screened/site/month` are shown with solved outputs.
+- Uncertainty labels now read `Pessimistic: Lower % (below)` and `Optimistic: Upper % (above)`.
+- Summary can show `Optimistic Timelines` and `Pessimistic Timelines` alongside base `Timelines`.
+- Cumulative series extends to pessimistic `LSLV` when uncertainty is enabled.
+- Scenario chart control is now `X-axis date range` (slider below the chart).
+- Optional `Show timeline markers` toggle is available below `Show active sites by month`.
+- Timeline markers include `FSFV`, `FSLV`, `LSFV`, and `LSLV` as bright yellow dotted vertical lines.
+- Legend order is fixed to `Screened`, `Randomized`, `Completed` with title `# of Subjects`.
+- Axes show tick marks and vertical grid lines.
+- Active-sites overlay bars were widened.
+- Comparison chart x-axis defaults extend one month past latest solved completion date and support the same `X-axis date range` slider.
+
 ## Modes
 
 ### Simple mode
 
-- Two drivers:
-- `# of Sites Drives Timeline` (fixed sites, solve for LSFV)
-- `Timeline Drives # of Sites` (fixed timeline, solve for sites)
+- Drivers: `Simple Scenario: # of Sites Drives Timeline` (fixed sites, solve for LSFV) and `Simple Scenario: Timeline Drives # of Sites` (fixed timeline, solve for sites)
 - Five scenario tabs (`S1-S5`) plus comparison tab
-- Scenario copy, save/load JSON, uncertainty bands
-- Dynamic chart date-range selectors on scenario and comparison charts
+- Scenario copy controls in a single row (dropdown + button)
+- Save/load JSON in comparison tab
+- Uncertainty bands and timeline projections
+- X-axis date range sliders for scenario and comparison charts
 
 ### Advanced mode
 
 - Single global scenario split across up to 20 countries
 - Weight-based integer goal allocation
 - Country-level runs + global aggregation
+- Uncertainty support on country/global curves
 - Map and pie analytics, country drill-down
-- Dynamic chart date-range selectors on global/site/country charts
+- X-axis date range sliders on global/site/country charts
 - Save/load JSON and PDF export
 
-## Current UI behavior highlights
+## Current UI Behavior Highlights
 
+- Sidebar mode selector title: `Mode`
 - Sidebar mode selector label: `Select one`
 - App baseline font: 10pt
 - Display date format: `dd-mmm-yyyy`
 - Date input widget format: `dd-mm-yyyy` (Streamlit limitation)
-- `Solve For` label replaces `Goal Type`
-- `Recruitment Rate type (primary)` replaces recruitment-period label
-- Primary-rate dropdown restricted to `Screened` and `Randomized`
+- `Solve For` replaces `Goal Type`
+- `Recruitment Rate type (primary)` replaces recruitment-period naming
+- Primary-rate options are `Screened` and `Randomized`
+
+## Save/Load Compatibility
+
+- Legacy simple mode label values are normalized automatically on load.
+- Legacy `Completed` primary-period values are auto-converted to `Randomized` when loading saved files.
 
 ## Documentation
 
 - Operator guide: `/Users/stevensweeney/Desktop/Codex/OPERATOR_GUIDE.md`
 
-## Project structure
+## Project Structure
 
 - `ui/` - Streamlit UI and persistence
 - `engine/` - solver and series derivation logic

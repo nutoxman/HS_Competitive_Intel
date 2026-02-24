@@ -742,14 +742,43 @@ def render_results(out, scenario_key: str):
     if u_enabled:
         df = _extend_cumulative_df_to_date(df, pessimistic_lslv)
 
-    st.markdown("## Cumulative recruitment over time")
+    st.markdown(
+        "<p style='font-size:10pt;font-weight:700;margin:0.5rem 0;'>Cumulative recruitment over time</p>",
+        unsafe_allow_html=True,
+    )
 
     df_long = df.melt(id_vars=["date"], value_vars=["Screened", "Randomized", "Completed"], var_name="state", value_name="value")
 
     df_long["lower"] = (df_long["value"] * (1.0 - u_lower / 100.0)).clip(lower=0.0)
     df_long["upper"] = df_long["value"] * (1.0 + u_upper / 100.0)
 
+    toggle_col1, toggle_col2 = st.columns(2)
+    with toggle_col1:
+        show_sites = st.checkbox("Show active sites by month", value=False, key=f"{scenario_key}_show_active_sites")
+    with toggle_col2:
+        show_timeline_markers = st.checkbox(
+            "Show timeline markers",
+            value=True,
+            key=f"{scenario_key}_show_timeline_markers",
+        )
+    show_sites_prev_key = f"{scenario_key}_show_active_sites_prev"
+    show_sites_prev = bool(st.session_state.get(show_sites_prev_key, False))
+
+    monthly = None
+    if show_sites and out.primary.active_sites:
+        active_df = pd.DataFrame(
+            {"date": list(out.primary.active_sites.keys()), "active_sites": list(out.primary.active_sites.values())}
+        ).sort_values("date")
+        active_df["month"] = active_df["date"].apply(lambda d: date(d.year, d.month, 1))
+        monthly = (
+            active_df.groupby("month", as_index=False)["active_sites"]
+            .mean()
+            .rename(columns={"month": "date"})
+        )
+
     domain_min = _coerce_to_date(df_long["date"].min()) if not df_long.empty else out.timelines.completed_fsfv
+    if monthly is not None and not monthly.empty:
+        domain_min = min(domain_min, _coerce_to_date(monthly["date"].min()))
     domain_max = _coerce_to_date(pessimistic_lslv + timedelta(days=30))
     chart_range_key = f"{scenario_key}_chart_date_range"
     selected_range = st.session_state.get(chart_range_key, (domain_min, domain_max))
@@ -757,6 +786,11 @@ def render_results(out, scenario_key: str):
     baseline_domain_max = _coerce_to_date(out.timelines.completed_lslv + timedelta(days=30))
     if domain_max > baseline_domain_max and range_end == baseline_domain_max:
         range_end = domain_max
+    if show_sites and (not show_sites_prev) and monthly is not None and not monthly.empty:
+        first_month_start = _coerce_to_date(monthly["date"].min())
+        range_start = min(range_start, first_month_start)
+        st.session_state[chart_range_key] = (range_start, range_end)
+    st.session_state[show_sites_prev_key] = show_sites
 
     base = alt.Chart(df_long).encode(
         x=alt.X(
@@ -778,17 +812,19 @@ def render_results(out, scenario_key: str):
     )
 
     layers = []
+    cumulative_axis = alt.Axis(
+        title="Cumulative",
+        orient="left",
+        ticks=True,
+        tickSize=AXIS_TICK_SIZE_PX,
+        grid=True,
+    )
     if u_enabled:
         layers.append(
             base.mark_area(opacity=0.18).encode(
                 y=alt.Y(
                     "lower:Q",
-                    axis=alt.Axis(
-                        title="Cumulative",
-                        ticks=True,
-                        tickSize=AXIS_TICK_SIZE_PX,
-                        grid=True,
-                    ),
+                    axis=None if show_sites else cumulative_axis,
                 ),
                 y2="upper:Q",
             )
@@ -798,12 +834,7 @@ def render_results(out, scenario_key: str):
         base.mark_line().encode(
             y=alt.Y(
                 "value:Q",
-                axis=alt.Axis(
-                    title="Cumulative",
-                    ticks=True,
-                    tickSize=AXIS_TICK_SIZE_PX,
-                    grid=True,
-                ),
+                axis=cumulative_axis,
             ),
             tooltip=[
                 alt.Tooltip("date:T", title="Date", format=DATE_DISPLAY_FORMAT),
@@ -813,23 +844,7 @@ def render_results(out, scenario_key: str):
         )
     )
 
-    show_sites = st.checkbox("Show active sites by month", value=False, key=f"{scenario_key}_show_active_sites")
-    show_timeline_markers = st.checkbox(
-        "Show timeline markers",
-        value=True,
-        key=f"{scenario_key}_show_timeline_markers",
-    )
-    if show_sites and out.primary.active_sites:
-        active_df = pd.DataFrame(
-            {"date": list(out.primary.active_sites.keys()), "active_sites": list(out.primary.active_sites.values())}
-        ).sort_values("date")
-        active_df["month"] = active_df["date"].apply(lambda d: date(d.year, d.month, 1))
-        monthly = (
-            active_df.groupby("month", as_index=False)["active_sites"]
-            .mean()
-            .rename(columns={"month": "date"})
-        )
-
+    if monthly is not None and not monthly.empty:
         bar = (
             alt.Chart(monthly)
             .mark_bar(opacity=0.25, size=ACTIVE_SITES_BAR_WIDTH_PX)
