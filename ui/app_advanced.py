@@ -90,6 +90,9 @@ def _resolve_date_range(selection, default_start: date, default_end: date) -> tu
 
     start = _coerce_to_date(start)
     end = _coerce_to_date(end)
+    # Keep the selected range within the current domain.
+    start = max(default_start, min(start, default_end))
+    end = max(default_start, min(end, default_end))
     if end < start:
         start, end = end, start
     return start, end
@@ -919,11 +922,12 @@ def render() -> None:
 
             layers.extend([countries_line, global_line])
             st.altair_chart(alt.layer(*layers).properties(height=320), width="stretch")
-            st.date_input(
-                "Display date range",
+            st.slider(
+                "X-axis date range",
+                min_value=domain_min,
+                max_value=domain_max,
                 value=(range_start, range_end),
                 key=global_range_key,
-                format=DATE_INPUT_FORMAT,
             )
 
             # Site activation chart
@@ -1016,11 +1020,12 @@ def render() -> None:
 
                 chart = alt.layer(bar, line).resolve_scale(y="independent").properties(height=320)
                 st.altair_chart(chart, width="stretch")
-                st.date_input(
-                    "Display site activation date range",
+                st.slider(
+                    "X-axis date range",
+                    min_value=domain_min,
+                    max_value=domain_max,
                     value=(site_range_start, site_range_end),
                     key=site_range_key,
-                    format=DATE_INPUT_FORMAT,
                 )
             else:
                 st.info("No site activation data available for selected countries.")
@@ -1112,11 +1117,12 @@ def render() -> None:
                 )
             )
             st.altair_chart(alt.layer(*layers).properties(height=320), width="stretch")
-            st.date_input(
-                "Display country date range",
+            st.slider(
+                "X-axis date range",
+                min_value=domain_min,
+                max_value=domain_max,
                 value=(country_range_start, country_range_end),
                 key=country_range_key,
-                format=DATE_INPUT_FORMAT,
             )
         else:
             st.info("No successful countries to display.")

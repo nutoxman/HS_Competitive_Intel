@@ -5,8 +5,9 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from engine.core.run_simple import run_simple_scenario
-from engine.core.targets import ValidationError
+from engine.core.solvers import solve_lsfv_fixed_sites, solve_sites_fixed_timeline
+from engine.core.targets import ValidationError, derive_targets
+from engine.core.timelines import derive_state_timelines
 from engine.models.scenario import ScenarioInputs
 from engine.models.settings import GlobalSettings
 
@@ -14,6 +15,12 @@ from engine.models.settings import GlobalSettings
 DATE_DISPLAY_FORMAT = "%d-%b-%Y"
 DATE_INPUT_FORMAT = "DD-MM-YYYY"
 TABLE_FONT_COLOR = "#09CFEA"
+STATE_SERIES_ORDER = ["Screened", "Randomized", "Completed"]
+SUBJECTS_LEGEND_TITLE = "# of Subjects"
+# Vega-Lite default continuous bar width is 5px; increased by 125% total.
+ACTIVE_SITES_BAR_WIDTH_PX = 11.25
+AXIS_TICK_SIZE_PX = 5
+TIMELINE_MARKER_COLOR = "#FFEA00"
 
 
 def _format_number(value):
@@ -65,6 +72,9 @@ def _resolve_date_range(selection, default_start: date, default_end: date) -> tu
 
     start = _coerce_to_date(start)
     end = _coerce_to_date(end)
+    # Keep the selected range within the current domain.
+    start = max(default_start, min(start, default_end))
+    end = max(default_start, min(end, default_end))
     if end < start:
         start, end = end, start
     return start, end
@@ -107,6 +117,165 @@ def _milestone_dates(fsfv: date, lsfv: date) -> list[date]:
             offset = int((pct / 100.0) * (duration - 1))
         milestones.append(fsfv + timedelta(days=offset))
     return milestones
+
+
+def _extend_cumulative_df_to_date(df: pd.DataFrame, end_date: date) -> pd.DataFrame:
+    if df.empty:
+        return df
+    current_end = _coerce_to_date(df["date"].max())
+    if end_date <= current_end:
+        return df
+
+    extension_dates = pd.date_range(start=current_end + timedelta(days=1), end=end_date, freq="D").date
+    if len(extension_dates) == 0:
+        return df
+
+    extension = pd.DataFrame({"date": extension_dates})
+    last_row = df.iloc[-1]
+    for col in df.columns:
+        if col == "date":
+            continue
+        extension[col] = last_row[col]
+
+    return pd.concat([df, extension], ignore_index=True)
+
+
+def _scenario_inputs_from_session_state(scenario_key: str, fallback_out) -> ScenarioInputs | None:
+    try:
+        driver = st.session_state.get(f"{scenario_key}_driver", "Fixed Sites")
+        fsfv = _coerce_to_date(st.session_state.get(f"{scenario_key}_fsfv", fallback_out.primary.fsfv))
+        lsfv_raw = st.session_state.get(f"{scenario_key}_lsfv", fallback_out.primary.lsfv)
+        sites_raw = st.session_state.get(f"{scenario_key}_sites", fallback_out.primary.sites)
+
+        lsfv = _coerce_to_date(lsfv_raw) if driver == "Fixed Timeline" else None
+        sites = int(sites_raw) if driver == "Fixed Sites" else None
+
+        return ScenarioInputs(
+            name=scenario_key,
+            goal_type=st.session_state.get(f"{scenario_key}_goal_type", "Randomized"),
+            goal_n=int(st.session_state.get(f"{scenario_key}_goal_n", 100)),
+            screen_fail_rate=float(st.session_state.get(f"{scenario_key}_screen_fail_rate", 0.2)),
+            discontinuation_rate=float(st.session_state.get(f"{scenario_key}_discontinuation_rate", 0.1)),
+            period_type=st.session_state.get(f"{scenario_key}_period_type", "Screened"),
+            driver=driver,
+            fsfv=fsfv,
+            lsfv=lsfv,
+            sites=sites,
+            lag_sr_days=int(st.session_state.get(f"{scenario_key}_lag_sr_days", 14)),
+            lag_rc_days=int(st.session_state.get(f"{scenario_key}_lag_rc_days", 60)),
+            sar_pct=[float(v) for v in st.session_state.get(f"{scenario_key}_sar_pct", [20, 40, 60, 80, 100, 100])],
+            rr_per_site_per_month=[float(v) for v in st.session_state.get(f"{scenario_key}_rr_pct", [1, 1, 1, 1, 1, 1])],
+        )
+    except Exception:
+        return None
+
+
+def _solve_uncertainty_timelines(
+    scenario_key: str,
+    out,
+    lower_pct: float,
+    upper_pct: float,
+) -> tuple[dict[str, date] | None, dict[str, date] | None]:
+    inputs = _scenario_inputs_from_session_state(scenario_key, out)
+    if not inputs:
+        return None, None
+
+    settings = GlobalSettings()
+    targets = derive_targets(
+        inputs.goal_type,
+        inputs.goal_n,
+        inputs.screen_fail_rate,
+        inputs.discontinuation_rate,
+    )
+
+    def solve_with_multiplier(multiplier: float) -> dict[str, date] | None:
+        try:
+            if inputs.driver == "Fixed Sites":
+                if inputs.sites is None:
+                    return None
+                solve = solve_lsfv_fixed_sites(
+                    fsfv=inputs.fsfv,
+                    sites=inputs.sites,
+                    period_type=inputs.period_type,
+                    targets=targets,
+                    screen_fail_rate=inputs.screen_fail_rate,
+                    discontinuation_rate=inputs.discontinuation_rate,
+                    lag_sr_days=inputs.lag_sr_days,
+                    lag_rc_days=inputs.lag_rc_days,
+                    sar_pct=inputs.sar_pct,
+                    rr_per_site_per_month=inputs.rr_per_site_per_month,
+                    settings=settings,
+                    throughput_multiplier=multiplier,
+                )
+                if not solve.reached or solve.solved_lsfv is None:
+                    return None
+                solved_lsfv = solve.solved_lsfv
+            else:
+                lsfv_fixed = inputs.lsfv or out.primary.lsfv
+                solve = solve_sites_fixed_timeline(
+                    fsfv=inputs.fsfv,
+                    lsfv=lsfv_fixed,
+                    period_type=inputs.period_type,
+                    targets=targets,
+                    screen_fail_rate=inputs.screen_fail_rate,
+                    discontinuation_rate=inputs.discontinuation_rate,
+                    lag_sr_days=inputs.lag_sr_days,
+                    lag_rc_days=inputs.lag_rc_days,
+                    sar_pct=inputs.sar_pct,
+                    rr_per_site_per_month=inputs.rr_per_site_per_month,
+                    settings=settings,
+                    throughput_multiplier=multiplier,
+                )
+                if not solve.reached:
+                    return None
+                solved_lsfv = lsfv_fixed
+
+            t = derive_state_timelines(
+                fsfv=inputs.fsfv,
+                lsfv=solved_lsfv,
+                period_type=inputs.period_type,
+                lag_sr_days=inputs.lag_sr_days,
+                lag_rc_days=inputs.lag_rc_days,
+            )
+            return {
+                "fsfv": inputs.fsfv,
+                "fslv": t.completed_fsfv,
+                "lsfv": solved_lsfv,
+                "lslv": t.completed_lslv,
+            }
+        except ValidationError:
+            return None
+
+    pessimistic = solve_with_multiplier(max(0.0, 1.0 - lower_pct / 100.0))
+    optimistic = solve_with_multiplier(1.0 + upper_pct / 100.0)
+    return optimistic, pessimistic
+
+
+def _render_timeline_block(title: str, timeline_values: dict[str, date] | None) -> None:
+    st.markdown(f"<p style='font-size:10pt;font-weight:700;margin:0;'>{title}</p>", unsafe_allow_html=True)
+    if not timeline_values:
+        st.markdown("<p style='font-size:10pt;margin:0.2rem 0;'>FSFV: --</p>", unsafe_allow_html=True)
+        st.markdown("<p style='font-size:10pt;margin:0.2rem 0;'>FSLV: --</p>", unsafe_allow_html=True)
+        st.markdown("<p style='font-size:10pt;margin:0.2rem 0;'>LSFV: --</p>", unsafe_allow_html=True)
+        st.markdown("<p style='font-size:10pt;margin:0.2rem 0;'>LSLV: --</p>", unsafe_allow_html=True)
+        return
+
+    st.markdown(
+        f"<p style='font-size:10pt;margin:0.2rem 0;'>FSFV: {_format_date(timeline_values['fsfv'])}</p>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<p style='font-size:10pt;margin:0.2rem 0;'>FSLV: {_format_date(timeline_values['fslv'])}</p>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<p style='font-size:10pt;margin:0.2rem 0;'>LSFV: {_format_date(timeline_values['lsfv'])}</p>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<p style='font-size:10pt;margin:0.2rem 0;'>LSLV: {_format_date(timeline_values['lslv'])}</p>",
+        unsafe_allow_html=True,
+    )
 
 
 def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
@@ -351,7 +520,7 @@ def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
         )
     with ucol2:
         uncertainty_lower_pct = st.number_input(
-            "Lower % (below)",
+            "Pessimistic: Lower % (below)",
             min_value=0.0,
             max_value=100.0,
             step=1.0,
@@ -359,7 +528,7 @@ def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
         )
     with ucol3:
         uncertainty_upper_pct = st.number_input(
-            "Upper % (above)",
+            "Optimistic: Upper % (above)",
             min_value=0.0,
             max_value=100.0,
             step=1.0,
@@ -387,12 +556,26 @@ def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
 def render_results(out, scenario_key: str):
     st.success("Run complete.")
 
+    u_enabled = st.session_state.get(f"{scenario_key}_uncertainty_enabled", False)
+    u_lower = float(st.session_state.get(f"{scenario_key}_uncertainty_lower_pct", 10.0))
+    u_upper = float(st.session_state.get(f"{scenario_key}_uncertainty_upper_pct", 10.0))
+
     total_randomized = max(out.states.randomized.cumulative.values()) if out.states.randomized.cumulative else 0.0
     total_screened = max(out.states.screened.cumulative.values()) if out.states.screened.cumulative else 0.0
     duration_days = max(1, (out.primary.lsfv - out.primary.fsfv).days)
     site_months = out.primary.sites * (duration_days / GlobalSettings().days_per_month)
     avg_randomized_per_site_month = (total_randomized / site_months) if site_months > 0 else 0.0
     avg_screened_per_site_month = (total_screened / site_months) if site_months > 0 else 0.0
+
+    optimistic_timelines = None
+    pessimistic_timelines = None
+    if u_enabled:
+        optimistic_timelines, pessimistic_timelines = _solve_uncertainty_timelines(
+            scenario_key,
+            out,
+            u_lower,
+            u_upper,
+        )
 
     st.markdown(
         """
@@ -410,7 +593,10 @@ def render_results(out, scenario_key: str):
 
     st.markdown("<p style='font-size:10pt;font-weight:700;'>Summary</p>", unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns(3)
+    if u_enabled:
+        col1, col2, col3, col4, col5 = st.columns(5)
+    else:
+        col1, col2, col3 = st.columns(3)
 
     with col1:
         st.metric("Target Screened", _format_number(out.targets.screened))
@@ -426,15 +612,25 @@ def render_results(out, scenario_key: str):
         st.metric("Avg Screened/site/month", _format_number(avg_screened_per_site_month))
 
     with col3:
-        fsfv = out.primary.fsfv
-        fslv = out.timelines.completed_fsfv
-        lsfv = out.primary.lsfv
-        lslv = out.timelines.completed_lslv
-        st.markdown("<p style='font-size:10pt;font-weight:700;margin:0;'>Timelines</p>", unsafe_allow_html=True)
-        st.markdown(f"<p style='font-size:10pt;margin:0.2rem 0;'>FSFV: {_format_date(fsfv)}</p>", unsafe_allow_html=True)
-        st.markdown(f"<p style='font-size:10pt;margin:0.2rem 0;'>FSLV: {_format_date(fslv)}</p>", unsafe_allow_html=True)
-        st.markdown(f"<p style='font-size:10pt;margin:0.2rem 0;'>LSFV: {_format_date(lsfv)}</p>", unsafe_allow_html=True)
-        st.markdown(f"<p style='font-size:10pt;margin:0.2rem 0;'>LSLV: {_format_date(lslv)}</p>", unsafe_allow_html=True)
+        _render_timeline_block(
+            "Timelines",
+            {
+                "fsfv": out.primary.fsfv,
+                "fslv": out.timelines.completed_fsfv,
+                "lsfv": out.primary.lsfv,
+                "lslv": out.timelines.completed_lslv,
+            },
+        )
+
+    if u_enabled:
+        with col4:
+            _render_timeline_block("Optimistic Timelines", optimistic_timelines)
+        with col5:
+            _render_timeline_block("Pessimistic Timelines", pessimistic_timelines)
+
+    pessimistic_lslv = out.timelines.completed_lslv
+    if pessimistic_timelines and "lslv" in pessimistic_timelines:
+        pessimistic_lslv = max(pessimistic_lslv, pessimistic_timelines["lslv"])
 
     # Cumulative chart (with optional uncertainty bands)
     def to_df(series_dict):
@@ -450,46 +646,72 @@ def render_results(out, scenario_key: str):
         .fillna(method="ffill")
         .fillna(0.0)
     )
+    if u_enabled:
+        df = _extend_cumulative_df_to_date(df, pessimistic_lslv)
 
     st.markdown("## Cumulative recruitment over time")
 
     df_long = df.melt(id_vars=["date"], value_vars=["Screened", "Randomized", "Completed"], var_name="state", value_name="value")
 
-    u_enabled = st.session_state.get(f"{scenario_key}_uncertainty_enabled", False)
-    u_lower = float(st.session_state.get(f"{scenario_key}_uncertainty_lower_pct", 10.0))
-    u_upper = float(st.session_state.get(f"{scenario_key}_uncertainty_upper_pct", 10.0))
-
     df_long["lower"] = (df_long["value"] * (1.0 - u_lower / 100.0)).clip(lower=0.0)
     df_long["upper"] = df_long["value"] * (1.0 + u_upper / 100.0)
 
     domain_min = _coerce_to_date(df_long["date"].min()) if not df_long.empty else out.timelines.completed_fsfv
-    domain_max = _coerce_to_date(out.timelines.completed_lslv + timedelta(days=30))
+    domain_max = _coerce_to_date(pessimistic_lslv + timedelta(days=30))
     chart_range_key = f"{scenario_key}_chart_date_range"
     selected_range = st.session_state.get(chart_range_key, (domain_min, domain_max))
     range_start, range_end = _resolve_date_range(selected_range, domain_min, domain_max)
+    baseline_domain_max = _coerce_to_date(out.timelines.completed_lslv + timedelta(days=30))
+    if domain_max > baseline_domain_max and range_end == baseline_domain_max:
+        range_end = domain_max
 
     base = alt.Chart(df_long).encode(
         x=alt.X(
             "date:T",
             title="Date",
             scale=alt.Scale(domain=[range_start, range_end]),
-            axis=alt.Axis(format=DATE_DISPLAY_FORMAT),
+            axis=alt.Axis(
+                format=DATE_DISPLAY_FORMAT,
+                ticks=True,
+                tickSize=AXIS_TICK_SIZE_PX,
+                grid=True,
+            ),
         ),
-        color=alt.Color("state:N", title="State"),
+        color=alt.Color(
+            "state:N",
+            title=SUBJECTS_LEGEND_TITLE,
+            scale=alt.Scale(domain=STATE_SERIES_ORDER),
+        ),
     )
 
     layers = []
     if u_enabled:
         layers.append(
             base.mark_area(opacity=0.18).encode(
-                y=alt.Y("lower:Q", title="Cumulative"),
+                y=alt.Y(
+                    "lower:Q",
+                    axis=alt.Axis(
+                        title="Cumulative",
+                        ticks=True,
+                        tickSize=AXIS_TICK_SIZE_PX,
+                        grid=True,
+                    ),
+                ),
                 y2="upper:Q",
             )
         )
 
     layers.append(
         base.mark_line().encode(
-            y=alt.Y("value:Q", title="Cumulative"),
+            y=alt.Y(
+                "value:Q",
+                axis=alt.Axis(
+                    title="Cumulative",
+                    ticks=True,
+                    tickSize=AXIS_TICK_SIZE_PX,
+                    grid=True,
+                ),
+            ),
             tooltip=[
                 alt.Tooltip("date:T", title="Date", format=DATE_DISPLAY_FORMAT),
                 alt.Tooltip("state:N", title="State"),
@@ -499,6 +721,11 @@ def render_results(out, scenario_key: str):
     )
 
     show_sites = st.checkbox("Show active sites by month", value=False, key=f"{scenario_key}_show_active_sites")
+    show_timeline_markers = st.checkbox(
+        "Show timeline markers",
+        value=True,
+        key=f"{scenario_key}_show_timeline_markers",
+    )
     if show_sites and out.primary.active_sites:
         active_df = pd.DataFrame(
             {"date": list(out.primary.active_sites.keys()), "active_sites": list(out.primary.active_sites.values())}
@@ -512,14 +739,28 @@ def render_results(out, scenario_key: str):
 
         bar = (
             alt.Chart(monthly)
-            .mark_bar(opacity=0.25)
+            .mark_bar(opacity=0.25, size=ACTIVE_SITES_BAR_WIDTH_PX)
             .encode(
                 x=alt.X(
                     "date:T",
                     scale=alt.Scale(domain=[range_start, range_end]),
-                    axis=alt.Axis(format=DATE_DISPLAY_FORMAT),
+                    axis=alt.Axis(
+                        format=DATE_DISPLAY_FORMAT,
+                        ticks=True,
+                        tickSize=AXIS_TICK_SIZE_PX,
+                        grid=True,
+                    ),
                 ),
-                y=alt.Y("active_sites:Q", axis=alt.Axis(title="Active Sites", orient="right")),
+                y=alt.Y(
+                    "active_sites:Q",
+                    axis=alt.Axis(
+                        title="Active Sites",
+                        orient="right",
+                        ticks=True,
+                        tickSize=AXIS_TICK_SIZE_PX,
+                        grid=False,
+                    ),
+                ),
                 tooltip=[
                     alt.Tooltip("date:T", title="Month", format=DATE_DISPLAY_FORMAT),
                     alt.Tooltip("active_sites:Q", title="Active Sites", format=".1f"),
@@ -528,19 +769,63 @@ def render_results(out, scenario_key: str):
         )
         layers.append(bar)
 
+    if show_timeline_markers:
+        timeline_markers = pd.DataFrame(
+            [
+                {"label": "FSFV", "date": out.primary.fsfv},
+                {"label": "FSLV", "date": out.timelines.completed_fsfv},
+                {"label": "LSFV", "date": out.primary.lsfv},
+                {"label": "LSLV", "date": out.timelines.completed_lslv},
+            ]
+        )
+        layers.append(
+            alt.Chart(timeline_markers)
+            .mark_rule(color=TIMELINE_MARKER_COLOR, strokeDash=[4, 4], strokeWidth=1.25)
+            .encode(
+                x=alt.X(
+                    "date:T",
+                    scale=alt.Scale(domain=[range_start, range_end]),
+                )
+            )
+        )
+        layers.append(
+            alt.Chart(timeline_markers)
+            .mark_text(
+                color=TIMELINE_MARKER_COLOR,
+                align="left",
+                baseline="top",
+                dx=4,
+                dy=4,
+                fontSize=10,
+                fontWeight="bold",
+            )
+            .encode(
+                x=alt.X(
+                    "date:T",
+                    scale=alt.Scale(domain=[range_start, range_end]),
+                ),
+                y=alt.value(4),
+                text="label:N",
+            )
+        )
+
     chart = alt.layer(*layers).properties(height=320)
     if show_sites:
         chart = chart.resolve_scale(y="independent")
 
     st.altair_chart(chart, width="stretch")
-    st.date_input(
-        "Display date range",
+    st.slider(
+        "X-axis date range",
+        min_value=domain_min,
+        max_value=domain_max,
         value=(range_start, range_end),
         key=chart_range_key,
-        format=DATE_INPUT_FORMAT,
     )
 
-    st.markdown("### Bucket summary (Monthly, Randomized)")
+    st.markdown(
+        "<p style='font-size:10pt;font-weight:700;'>Bucket summary (Monthly, Randomized)</p>",
+        unsafe_allow_html=True,
+    )
     bucket_df = pd.DataFrame(out.buckets["month"]["Randomized"]).rename(
         columns={
             "incremental": "Incremental Enrollment",
@@ -552,14 +837,20 @@ def render_results(out, scenario_key: str):
     bucket_df = _format_dataframe_numbers(bucket_df)
     st.dataframe(bucket_df, width="stretch")
 
-    st.markdown("## Incremental (5%) milestones over time")
+    st.markdown(
+        "<p style='font-size:10pt;font-weight:700;'>Incremental (5%) milestones over time</p>",
+        unsafe_allow_html=True,
+    )
     sel_state = st.selectbox("State", ["Screened", "Randomized", "Completed"], key=f"{scenario_key}_milestone_state")
     milestones_time_df = pd.DataFrame(out.milestones_time[sel_state])
     milestones_time_df = _format_dataframe_dates(milestones_time_df)
     milestones_time_df = _format_dataframe_numbers(milestones_time_df)
     st.dataframe(milestones_time_df, width="stretch")
 
-    st.markdown("## Target milestones (5% of target)")
+    st.markdown(
+        "<p style='font-size:10pt;font-weight:700;'>Target milestones (5% of target)</p>",
+        unsafe_allow_html=True,
+    )
     milestones_target_df = pd.DataFrame(out.milestones_target[sel_state])
     milestones_target_df = _format_dataframe_dates(milestones_target_df)
     milestones_target_df = _format_dataframe_numbers(milestones_target_df)

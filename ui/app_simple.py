@@ -41,6 +41,9 @@ def _resolve_date_range(selection, default_start: date, default_end: date) -> tu
 
     start = _coerce_to_date(start)
     end = _coerce_to_date(end)
+    # Keep the selected range within the current domain.
+    start = max(default_start, min(start, default_end))
+    end = max(default_start, min(end, default_end))
     if end < start:
         start, end = end, start
     return start, end
@@ -285,11 +288,12 @@ def render():
             )
 
             st.altair_chart(alt.layer(*layers).properties(height=320), width="stretch")
-            st.date_input(
-                "Display date range",
+            st.slider(
+                "X-axis date range",
+                min_value=domain_min,
+                max_value=domain_max,
                 value=(range_start, range_end),
                 key=compare_range_key,
-                format=DATE_INPUT_FORMAT,
             )
 
 
