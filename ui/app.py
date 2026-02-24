@@ -38,48 +38,134 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.sidebar.title("Mode")
-mode = st.sidebar.radio(
-    "Select one",
-    [
-        "Simple Scenario: Simple Scenario: # of Sites Drives Timeline",
-        "Simple Scenario: Timeline Drives # of Sites",
-        "Advanced",
-    ],
-    index=0,
-    key="app_mode",
-)
+LEGACY_FIXED_SITES_MODE = "Simple Scenario: Simple Scenario: # of Sites Drives Timeline"
+FIXED_SITES_MODE = "Simple Scenario: # of Sites Drives Timeline"
+FIXED_TIMELINE_MODE = "Simple Scenario: Timeline Drives # of Sites"
+ADVANCED_MODE = "Advanced"
+MODE_ALIASES = {
+    LEGACY_FIXED_SITES_MODE: FIXED_SITES_MODE,
+}
 
 SIMPLE_MODES = {
-    "Simple Scenario: Simple Scenario: # of Sites Drives Timeline",
-    "Simple Scenario: Timeline Drives # of Sites",
+    FIXED_SITES_MODE,
+    FIXED_TIMELINE_MODE,
 }
-SIMPLE_SHARED_KEYS = {"save_name", "compare_state"}
+SIMPLE_SHARED_KEYS = {"save_name", "compare_state", "compare_date_range"}
+SIMPLE_MODE_SNAPSHOTS_KEY = "_simple_mode_snapshots"
+TRANSIENT_WIDGET_KEY_SUFFIXES = ("_btn", "_editor", "_uploader")
+
+
+def _normalize_mode_label(mode: str | None) -> str | None:
+    if mode is None:
+        return None
+    return MODE_ALIASES.get(mode, mode)
+
+
+def _is_transient_widget_key(key: str) -> bool:
+    return key.endswith(TRANSIENT_WIDGET_KEY_SUFFIXES)
+
+
+def _purge_transient_widget_keys(session_state: dict) -> None:
+    for key in list(session_state.keys()):
+        if _is_transient_widget_key(key):
+            session_state.pop(key, None)
+
+    simple_snapshots = session_state.get(SIMPLE_MODE_SNAPSHOTS_KEY, {})
+    if isinstance(simple_snapshots, dict):
+        for snapshot in simple_snapshots.values():
+            if isinstance(snapshot, dict):
+                for key in list(snapshot.keys()):
+                    if _is_transient_widget_key(key):
+                        snapshot.pop(key, None)
+
+    advanced_snapshot = session_state.get("_advanced_state_snapshot")
+    if isinstance(advanced_snapshot, dict):
+        for key in list(advanced_snapshot.keys()):
+            if _is_transient_widget_key(key):
+                advanced_snapshot.pop(key, None)
 
 
 def _capture_simple_state(session_state: dict) -> dict:
     snapshot: dict = {}
     for key, value in session_state.items():
+        if _is_transient_widget_key(key):
+            continue
         if key.startswith(("S1_", "S2_", "S3_", "S4_", "S5_")) or key in SIMPLE_SHARED_KEYS:
             snapshot[key] = copy.deepcopy(value)
     return snapshot
 
 
-def _restore_simple_state(session_state: dict, snapshot: dict) -> None:
+def _capture_advanced_state(session_state: dict) -> dict:
+    snapshot: dict = {}
+    for key, value in session_state.items():
+        if _is_transient_widget_key(key):
+            continue
+        if key.startswith("adv_") or key in {"_adv_pending_load_payload"}:
+            snapshot[key] = copy.deepcopy(value)
+    return snapshot
+
+
+def _clear_simple_state(session_state: dict) -> None:
+    for key in list(session_state.keys()):
+        if key.startswith(("S1_", "S2_", "S3_", "S4_", "S5_")) or key in SIMPLE_SHARED_KEYS:
+            session_state.pop(key, None)
+
+
+def _restore_state(session_state: dict, snapshot: dict) -> None:
     for key, value in snapshot.items():
-        if key not in session_state:
-            session_state[key] = copy.deepcopy(value)
+        if _is_transient_widget_key(key):
+            continue
+        session_state[key] = copy.deepcopy(value)
 
 
-previous_mode = st.session_state.get("_last_app_mode")
-if previous_mode in SIMPLE_MODES and mode == "Advanced":
-    st.session_state["_simple_state_snapshot"] = _capture_simple_state(st.session_state)
-elif previous_mode == "Advanced" and mode in SIMPLE_MODES:
-    _restore_simple_state(st.session_state, st.session_state.get("_simple_state_snapshot", {}))
+_purge_transient_widget_keys(st.session_state)
+
+if "app_mode" in st.session_state:
+    st.session_state["app_mode"] = _normalize_mode_label(st.session_state.get("app_mode"))
+if "_last_app_mode" in st.session_state:
+    st.session_state["_last_app_mode"] = _normalize_mode_label(st.session_state.get("_last_app_mode"))
+if "simple_mode_scenario" in st.session_state:
+    st.session_state["simple_mode_scenario"] = _normalize_mode_label(st.session_state.get("simple_mode_scenario"))
+
+st.sidebar.title("Mode")
+mode = st.sidebar.radio(
+    "Select one",
+    [
+        FIXED_SITES_MODE,
+        FIXED_TIMELINE_MODE,
+        ADVANCED_MODE,
+    ],
+    index=0,
+    key="app_mode",
+)
+mode = _normalize_mode_label(mode)
+if st.session_state.get("app_mode") != mode:
+    st.session_state["app_mode"] = mode
+
+previous_mode = _normalize_mode_label(st.session_state.get("_last_app_mode"))
+mode_changed = previous_mode is not None and previous_mode != mode
+simple_snapshots = st.session_state.setdefault(SIMPLE_MODE_SNAPSHOTS_KEY, {})
+if not isinstance(simple_snapshots, dict):
+    simple_snapshots = {}
+    st.session_state[SIMPLE_MODE_SNAPSHOTS_KEY] = simple_snapshots
+if LEGACY_FIXED_SITES_MODE in simple_snapshots and FIXED_SITES_MODE not in simple_snapshots:
+    simple_snapshots[FIXED_SITES_MODE] = simple_snapshots.pop(LEGACY_FIXED_SITES_MODE)
+
+if mode_changed:
+    if previous_mode in SIMPLE_MODES:
+        simple_snapshots[previous_mode] = _capture_simple_state(st.session_state)
+    elif previous_mode == ADVANCED_MODE:
+        st.session_state["_advanced_state_snapshot"] = _capture_advanced_state(st.session_state)
+
+    if mode in SIMPLE_MODES:
+        _clear_simple_state(st.session_state)
+        _restore_state(st.session_state, simple_snapshots.get(mode, {}))
+    elif mode == ADVANCED_MODE:
+        _restore_state(st.session_state, st.session_state.get("_advanced_state_snapshot", {}))
 
 st.session_state["_last_app_mode"] = mode
 
-if mode == "Advanced":
+if mode == ADVANCED_MODE:
     from ui.app_advanced import render as render_advanced
 
     render_advanced()

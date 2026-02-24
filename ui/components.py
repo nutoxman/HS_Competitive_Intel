@@ -15,6 +15,9 @@ from engine.models.settings import GlobalSettings
 DATE_DISPLAY_FORMAT = "%d-%b-%Y"
 DATE_INPUT_FORMAT = "DD-MM-YYYY"
 TABLE_FONT_COLOR = "#09CFEA"
+LEGACY_FIXED_SITES_MODE = "Simple Scenario: Simple Scenario: # of Sites Drives Timeline"
+FIXED_SITES_MODE = "Simple Scenario: # of Sites Drives Timeline"
+FIXED_TIMELINE_MODE = "Simple Scenario: Timeline Drives # of Sites"
 STATE_SERIES_ORDER = ["Screened", "Randomized", "Completed"]
 SUBJECTS_LEGEND_TITLE = "# of Subjects"
 # Vega-Lite default continuous bar width is 5px; increased by 125% total.
@@ -117,6 +120,12 @@ def _milestone_dates(fsfv: date, lsfv: date) -> list[date]:
             offset = int((pct / 100.0) * (duration - 1))
         milestones.append(fsfv + timedelta(days=offset))
     return milestones
+
+
+def _normalize_simple_mode_label(mode: str | None) -> str | None:
+    if mode == LEGACY_FIXED_SITES_MODE:
+        return FIXED_SITES_MODE
+    return mode
 
 
 def _extend_cumulative_df_to_date(df: pd.DataFrame, end_date: date) -> pd.DataFrame:
@@ -284,8 +293,6 @@ def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
     Uses st.session_state to persist values per scenario.
     """
 
-    st.subheader(f"Scenario {scenario_key} Inputs")
-
     # Initialize session defaults if not present
     if f"{scenario_key}_initialized" not in st.session_state:
         today = date.today()
@@ -294,7 +301,7 @@ def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
         st.session_state[f"{scenario_key}_screen_fail_rate"] = 0.2
         st.session_state[f"{scenario_key}_discontinuation_rate"] = 0.1
         st.session_state[f"{scenario_key}_period_type"] = "Screened"
-        st.session_state[f"{scenario_key}_simple_scenario"] = "Simple Scenario: Simple Scenario: # of Sites Drives Timeline"
+        st.session_state[f"{scenario_key}_simple_scenario"] = FIXED_SITES_MODE
         st.session_state[f"{scenario_key}_driver"] = "Fixed Sites"
         st.session_state[f"{scenario_key}_fsfv"] = today
         st.session_state[f"{scenario_key}_lsfv"] = _one_year_after(today)
@@ -312,26 +319,34 @@ def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
     if st.session_state.get(f"{scenario_key}_period_type") not in {"Screened", "Randomized"}:
         st.session_state[f"{scenario_key}_period_type"] = "Randomized"
 
-    global_scenario = st.session_state.get("simple_mode_scenario")
+    existing_scenario = _normalize_simple_mode_label(st.session_state.get(f"{scenario_key}_simple_scenario"))
+    if existing_scenario:
+        st.session_state[f"{scenario_key}_simple_scenario"] = existing_scenario
+
+    global_scenario = _normalize_simple_mode_label(st.session_state.get("simple_mode_scenario"))
     if global_scenario:
         st.session_state[f"{scenario_key}_simple_scenario"] = global_scenario
         simple_scenario = global_scenario
-        mode_label = {
-            "Simple Scenario: Simple Scenario: # of Sites Drives Timeline": "Simple Scenario: # of Sites Drives Timeline",
-            "Simple Scenario: Timeline Drives # of Sites": "Simple Scenario: Timeline Drives # of Sites",
-        }.get(simple_scenario, simple_scenario)
-        st.caption(mode_label)
     else:
         simple_scenario = st.selectbox(
             "Simple Scenario",
             [
-                "Simple Scenario: Simple Scenario: # of Sites Drives Timeline",
-                "Simple Scenario: Timeline Drives # of Sites",
+                FIXED_SITES_MODE,
+                FIXED_TIMELINE_MODE,
             ],
             key=f"{scenario_key}_simple_scenario",
         )
 
-    if simple_scenario.startswith("Simple Scenario: Simple Scenario: # of Sites Drives Timeline"):
+    mode_suffix = {
+        FIXED_SITES_MODE: "# of Sites Drives Timeline",
+        FIXED_TIMELINE_MODE: "Timeline Drives # of Sites",
+    }.get(simple_scenario, simple_scenario)
+    st.markdown(
+        f"<p style='font-size:11pt;font-weight:700;margin:0 0 0.5rem 0;'>Scenario {scenario_key} Inputs: {mode_suffix}</p>",
+        unsafe_allow_html=True,
+    )
+
+    if simple_scenario == FIXED_SITES_MODE:
         driver = "Fixed Sites"
     else:
         driver = "Fixed Timeline"
@@ -339,86 +354,161 @@ def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
     st.session_state[f"{scenario_key}_driver"] = driver
     _render_table_color_css(scenario_key)
 
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        goal_type = st.selectbox(
-            "Solve For",
-            ["Randomized", "Completed"],
-            format_func=lambda v: {"Randomized": "Total Randomized", "Completed": "Total Completed"}[v],
-            key=f"{scenario_key}_goal_type",
-        )
-        goal_n = st.number_input(
-            "Goal N",
-            min_value=1,
-            step=1,
-            key=f"{scenario_key}_goal_n",
-        )
-        screen_fail_rate = st.slider(
-            "Screen fail rate",
-            0.0,
-            0.99,
-            key=f"{scenario_key}_screen_fail_rate",
-        )
-        discontinuation_rate = st.slider(
-            "Discontinuation rate",
-            0.0,
-            0.99,
-            key=f"{scenario_key}_discontinuation_rate",
-        )
-
-    with col2:
-        period_type = st.selectbox(
-            "Recruitment Rate type (primary)",
-            ["Screened", "Randomized"],
-            key=f"{scenario_key}_period_type",
-        )
-        fsfv = st.date_input(
-            "FSFV (inclusive)",
-            key=f"{scenario_key}_fsfv",
-            format=DATE_INPUT_FORMAT,
-        )
-
-        if driver == "Fixed Timeline":
-            lsfv = st.date_input(
-                "LSFV (exclusive)",
-                key=f"{scenario_key}_lsfv",
-                format=DATE_INPUT_FORMAT,
-            )
-            sites = None
-        else:
-            lsfv = None
+    if driver == "Fixed Sites":
+        row1_col1, row1_col2, row1_col3, row1_col4 = st.columns(4)
+        with row1_col1:
             sites = st.number_input(
                 "Sites",
                 min_value=1,
                 step=1,
                 key=f"{scenario_key}_sites",
             )
+        with row1_col2:
+            period_type = st.selectbox(
+                "Recruitment Rate type (primary)",
+                ["Screened", "Randomized"],
+                key=f"{scenario_key}_period_type",
+            )
+        with row1_col3:
+            lag_sr_days = st.number_input(
+                "Lag Screened → Randomized (days)",
+                min_value=0,
+                step=1,
+                key=f"{scenario_key}_lag_sr_days",
+            )
+        with row1_col4:
+            screen_fail_rate = st.slider(
+                "Screen fail rate",
+                0.0,
+                0.99,
+                key=f"{scenario_key}_screen_fail_rate",
+            )
 
-    with col3:
-        lag_sr_days = st.number_input(
-            "Lag Screened → Randomized (days)",
-            min_value=0,
-            step=1,
-            key=f"{scenario_key}_lag_sr_days",
-        )
-        lag_rc_days = st.number_input(
-            "Lag Randomized → Completed (days)",
-            min_value=0,
-            step=1,
-            key=f"{scenario_key}_lag_rc_days",
-        )
+        row2_col1, row2_col2, row2_col3, row2_col4 = st.columns(4)
+        with row2_col1:
+            goal_n = st.number_input(
+                "Goal N",
+                min_value=1,
+                step=1,
+                key=f"{scenario_key}_goal_n",
+            )
+        with row2_col2:
+            fsfv = st.date_input(
+                "FSFV (inclusive)",
+                key=f"{scenario_key}_fsfv",
+                format=DATE_INPUT_FORMAT,
+            )
+        with row2_col3:
+            lag_rc_days = st.number_input(
+                "Lag Randomized → Completed (days)",
+                min_value=0,
+                step=1,
+                key=f"{scenario_key}_lag_rc_days",
+            )
+        with row2_col4:
+            discontinuation_rate = st.slider(
+                "Discontinuation rate",
+                0.0,
+                0.99,
+                key=f"{scenario_key}_discontinuation_rate",
+            )
+
+        row3_col1, _, _, _ = st.columns(4)
+        with row3_col1:
+            goal_type = st.selectbox(
+                "Solve For",
+                ["Randomized", "Completed"],
+                format_func=lambda v: {"Randomized": "Total Randomized", "Completed": "Total Completed"}[v],
+                key=f"{scenario_key}_goal_type",
+            )
+
         include = st.checkbox(
             "Include in comparison",
             key=f"{scenario_key}_include",
         )
+        lsfv = None
+    else:
+        row1_col1, row1_col2, row1_col3, row1_col4 = st.columns(4)
+        with row1_col1:
+            goal_n = st.number_input(
+                "Goal N",
+                min_value=1,
+                step=1,
+                key=f"{scenario_key}_goal_n",
+            )
+        with row1_col2:
+            period_type = st.selectbox(
+                "Recruitment Rate type (primary)",
+                ["Screened", "Randomized"],
+                key=f"{scenario_key}_period_type",
+            )
+        with row1_col3:
+            lag_sr_days = st.number_input(
+                "Lag Screened → Randomized (days)",
+                min_value=0,
+                step=1,
+                key=f"{scenario_key}_lag_sr_days",
+            )
+        with row1_col4:
+            screen_fail_rate = st.slider(
+                "Screen fail rate",
+                0.0,
+                0.99,
+                key=f"{scenario_key}_screen_fail_rate",
+            )
+
+        row2_col1, row2_col2, row2_col3, row2_col4 = st.columns(4)
+        with row2_col1:
+            goal_type = st.selectbox(
+                "Solve For",
+                ["Randomized", "Completed"],
+                format_func=lambda v: {"Randomized": "Total Randomized", "Completed": "Total Completed"}[v],
+                key=f"{scenario_key}_goal_type",
+            )
+        with row2_col2:
+            fsfv = st.date_input(
+                "FSFV (inclusive)",
+                key=f"{scenario_key}_fsfv",
+                format=DATE_INPUT_FORMAT,
+            )
+        with row2_col3:
+            lag_rc_days = st.number_input(
+                "Lag Randomized → Completed (days)",
+                min_value=0,
+                step=1,
+                key=f"{scenario_key}_lag_rc_days",
+            )
+        with row2_col4:
+            discontinuation_rate = st.slider(
+                "Discontinuation rate",
+                0.0,
+                0.99,
+                key=f"{scenario_key}_discontinuation_rate",
+            )
+
+        row3_col1, _, _, _ = st.columns(4)
+        with row3_col1:
+            lsfv = st.date_input(
+                "LSFV (exclusive)",
+                key=f"{scenario_key}_lsfv",
+                format=DATE_INPUT_FORMAT,
+            )
+
+        include = st.checkbox(
+            "Include in comparison",
+            key=f"{scenario_key}_include",
+        )
+        sites = None
 
     rr_label_map = {
         "Screened": "screened",
         "Randomized": "randomized",
     }
     rr_label = rr_label_map.get(period_type, "randomized")
-    st.markdown(f"### # of subjects {rr_label}/site/month")
+    st.markdown(
+        f"<p style='font-size:11pt;font-weight:700;margin:0.5rem 0;'># of subjects {rr_label}/site/month</p>",
+        unsafe_allow_html=True,
+    )
     rr_columns = ["0% (FSFV)", "20%", "40%", "60%", "80%", "100%"]
     rr_input_cols = ["#/site/month"] + rr_columns
     rr_input_df = pd.DataFrame(
@@ -465,7 +555,10 @@ def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
             column_config=rr_output_config,
         )
 
-    st.markdown("### Site Activation Rate at % Milestones from FSFV to LSFV")
+    st.markdown(
+        "<p style='font-size:11pt;font-weight:700;margin:0.5rem 0;'>Site Activation Rate at % Milestones from FSFV to LSFV</p>",
+        unsafe_allow_html=True,
+    )
     sar_columns = ["0% (FSFV)", "20%", "40%", "60%", "80%", "100%"]
     sar_input_cols = ["Metric"] + sar_columns
     sar_input_df = pd.DataFrame(
@@ -511,7 +604,7 @@ def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
             column_config=sar_output_config,
         )
 
-    st.markdown("### Uncertainty bands")
+    st.markdown("<p style='font-size:11pt;font-weight:700;margin:0.5rem 0;'>Uncertainty bands</p>", unsafe_allow_html=True)
     ucol1, ucol2, ucol3 = st.columns([1, 1, 1])
     with ucol1:
         uncertainty_enabled = st.checkbox(

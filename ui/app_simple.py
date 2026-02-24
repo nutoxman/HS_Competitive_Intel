@@ -15,10 +15,17 @@ from engine.models.settings import GlobalSettings
 from ui.components import render_scenario_inputs, render_results
 
 
-FIXED_SITES_MODE = "Simple Scenario: Simple Scenario: # of Sites Drives Timeline"
+LEGACY_FIXED_SITES_MODE = "Simple Scenario: Simple Scenario: # of Sites Drives Timeline"
+FIXED_SITES_MODE = "Simple Scenario: # of Sites Drives Timeline"
 FIXED_TIMELINE_MODE = "Simple Scenario: Timeline Drives # of Sites"
 DATE_AXIS_FORMAT = "%d-%b-%Y"
 DATE_INPUT_FORMAT = "DD-MM-YYYY"
+
+
+def _normalize_simple_mode(mode: str | None) -> str | None:
+    if mode == LEGACY_FIXED_SITES_MODE:
+        return FIXED_SITES_MODE
+    return mode
 
 
 def _coerce_to_date(value):
@@ -50,7 +57,10 @@ def _resolve_date_range(selection, default_start: date, default_end: date) -> tu
 
 
 def render():
-    selected_mode = st.session_state.get("simple_mode_scenario")
+    selected_mode = _normalize_simple_mode(st.session_state.get("simple_mode_scenario"))
+    if selected_mode != st.session_state.get("simple_mode_scenario"):
+        st.session_state["simple_mode_scenario"] = selected_mode
+
     if selected_mode == FIXED_TIMELINE_MODE:
         page_title = "Simple Mode: Timeline Drives # of Sites"
     else:
@@ -82,14 +92,18 @@ def render():
             scenario_key = f"S{i}"
             # Scenario copy controls (shown only after at least one scenario has been run)
             if copy_controls_visible:
-                copy_from = st.selectbox(
-                    "Copy inputs from:",
-                    ["(none)", "S1", "S2", "S3", "S4", "S5"],
-                    index=0,
-                    key=f"{scenario_key}_copy_from",
-                    width=96,
-                )
-                if st.button("Copy", key=f"{scenario_key}_copy_btn"):
+                copy_col, copy_btn_col = st.columns([5, 1])
+                with copy_col:
+                    copy_from = st.selectbox(
+                        "Copy inputs from:",
+                        ["(none)", "S1", "S2", "S3", "S4", "S5"],
+                        index=0,
+                        key=f"{scenario_key}_copy_from",
+                    )
+                with copy_btn_col:
+                    copy_clicked = st.button("Copy", key=f"{scenario_key}_copy_btn", use_container_width=True)
+
+                if copy_clicked:
                     if copy_from != "(none)" and copy_from != scenario_key:
                         # Copy known session_state keys
                         keys_to_copy = [
