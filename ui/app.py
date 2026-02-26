@@ -53,6 +53,7 @@ SIMPLE_MODES = {
 SIMPLE_SHARED_KEYS = {"save_name", "compare_state", "compare_date_range"}
 SIMPLE_MODE_SNAPSHOTS_KEY = "_simple_mode_snapshots"
 TRANSIENT_WIDGET_KEY_SUFFIXES = ("_btn", "_editor", "_uploader")
+RERUN_EPHEMERAL_KEY_SUFFIXES = ("_btn", "_uploader")
 
 
 def _normalize_mode_label(mode: str | None) -> str | None:
@@ -67,7 +68,9 @@ def _is_transient_widget_key(key: str) -> bool:
 
 def _purge_transient_widget_keys(session_state: dict) -> None:
     for key in list(session_state.keys()):
-        if _is_transient_widget_key(key):
+        # Keep editor widget state during normal reruns so latest table edits
+        # are not discarded before a Run click is processed.
+        if key.endswith(RERUN_EPHEMERAL_KEY_SUFFIXES):
             session_state.pop(key, None)
 
     simple_snapshots = session_state.get(SIMPLE_MODE_SNAPSHOTS_KEY, {})

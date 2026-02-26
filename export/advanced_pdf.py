@@ -54,7 +54,7 @@ def _build_map_df(results: list[dict[str, Any]]) -> pd.DataFrame:
                 "screened_total": _max_cumulative(out.states.screened.cumulative),
                 "randomized_total": _max_cumulative(out.states.randomized.cumulative),
                 "completed_total": _max_cumulative(out.states.completed.cumulative),
-                "sites": out.solve.solved_sites or 0,
+                "sites": out.primary.sites,
             }
         )
     return pd.DataFrame(rows)
@@ -172,19 +172,17 @@ def build_advanced_pdf(res: dict, session_state: dict, countries_df: pd.DataFram
     story.append(Spacer(1, 0.2 * inch))
 
     driver = session_state.get("adv_driver", "")
-    goal_type = session_state.get("adv_goal_type", "")
-    goal_n = session_state.get("adv_goal_n", "")
+    period_type = session_state.get("adv_period_type", "")
 
     countries = res.get("countries", [])
-    failed = [c for c in countries if c.get("status") != "ok"]
     ok = [c for c in countries if c.get("status") == "ok"]
 
     global_lslv = res.get("global_lslv")
     global_lslv_str = _format_date(global_lslv) if isinstance(global_lslv, date) else "N/A"
 
     exec_text = (
-        f"Driver: {driver}. Goal: {goal_type} = {goal_n}. "
-        f"Countries: {len(countries)} (failed: {len(failed)}). "
+        f"Driver: {driver}. Recruitment Rate Type: {period_type} (country-level targets). "
+        f"Countries: {len(countries)}. "
         f"Global LSLV: {global_lslv_str}."
     )
     story.append(Paragraph(exec_text, styles["BodyText"]))
@@ -231,10 +229,11 @@ def build_advanced_pdf(res: dict, session_state: dict, countries_df: pd.DataFram
         [
             "Country",
             "Region",
-            "Target Rand",
-            "Target Comp",
-            "Solved Sites",
-            "Solved LSFV",
+            "Target Screened",
+            "Target Randomized",
+            "Target Completed",
+            "Sites",
+            "LSFV",
             "LSLV",
             "Status",
         ]
@@ -246,10 +245,11 @@ def build_advanced_pdf(res: dict, session_state: dict, countries_df: pd.DataFram
                 [
                     r["country"],
                     r["region"],
+                    _format_number(out.targets.screened),
                     _format_number(out.targets.randomized),
                     _format_number(out.targets.completed),
-                    out.solve.solved_sites or "",
-                    _format_date(out.solve.solved_lsfv) if out.solve.solved_lsfv else "",
+                    out.primary.sites,
+                    _format_date(out.primary.lsfv),
                     _format_date(out.timelines.completed_lslv) if out.timelines.completed_lslv else "",
                     r.get("status"),
                 ]
@@ -259,6 +259,7 @@ def build_advanced_pdf(res: dict, session_state: dict, countries_df: pd.DataFram
                 [
                     r["country"],
                     r["region"],
+                    "",
                     "",
                     "",
                     "",

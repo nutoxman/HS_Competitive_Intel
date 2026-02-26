@@ -3,6 +3,7 @@ from datetime import date
 from engine.core.targets import derive_targets
 from engine.core.solvers import solve_lsfv_fixed_sites, solve_sites_fixed_timeline
 from engine.models.settings import GlobalSettings
+from engine.models.types import Targets
 
 
 def test_solve_lsfv_fixed_sites_reaches_target():
@@ -49,3 +50,25 @@ def test_solve_sites_fixed_timeline_reaches_target():
     assert res.reached is True
     assert res.solved_sites is not None
     assert res.solved_sites >= 1
+
+
+def test_solve_lsfv_fixed_sites_screened_target_100_is_about_ten_model_months():
+    settings = GlobalSettings()  # uses 365.25/12 days per month
+    targets = Targets(screened=100.0, randomized=80.0, completed=72.0)
+
+    res = solve_lsfv_fixed_sites(
+        fsfv=date(2026, 2, 26),
+        sites=10,
+        period_type="Screened",
+        targets=targets,
+        screen_fail_rate=0.2,
+        discontinuation_rate=0.1,
+        lag_sr_days=14,
+        lag_rc_days=60,
+        sar_pct=[100, 100, 100, 100, 100, 100],
+        rr_per_site_per_month=[1, 1, 1, 1, 1, 1],
+        settings=settings,
+    )
+
+    assert res.reached is True
+    assert res.solved_lsfv == date(2026, 12, 28)

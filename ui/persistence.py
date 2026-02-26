@@ -110,11 +110,10 @@ ADV_SCHEMA_VERSION = 1
 
 def dump_advanced_state(session_state: dict) -> dict:
     keys = [
-        "adv_goal_type",
-        "adv_goal_n",
         "adv_screen_fail_rate",
         "adv_discontinuation_rate",
         "adv_period_type",
+        "_adv_period_picked",
         "adv_driver",
         "adv_lag_sr_days",
         "adv_lag_rc_days",
@@ -130,6 +129,7 @@ def dump_advanced_state(session_state: dict) -> dict:
         "adv_country_config",
         "adv_map_metric",
         "adv_map_view",
+        "adv_map_color_scheme",
         "adv_pie_enabled",
         "adv_pie_scope",
         "adv_pie_metric_family",
@@ -157,9 +157,20 @@ def load_advanced_state(payload: dict, session_state: dict) -> None:
         parsed = _restore_dates(v)
         if k == "adv_period_type" and parsed == "Completed":
             parsed = "Randomized"
+        if k == "adv_period_type":
+            session_state["_adv_period_picked"] = parsed in {"Screened", "Randomized"}
         session_state[k] = parsed
+
+    period = session_state.get("adv_period_type")
+    if session_state.get("_adv_period_picked", False) and period in {"Screened", "Randomized"}:
+        session_state["adv_period_type_picker"] = period
+    else:
+        session_state["adv_period_type_picker"] = "(select)"
 
     # Clear results and editor state
     session_state.pop("adv_results", None)
     session_state.pop("adv_country_editor", None)
+    session_state.pop("adv_pdf_bytes", None)
+    session_state.pop("_adv_last_run_signature", None)
+    session_state.pop("_adv_results_stale", None)
     session_state["adv_initialized"] = True

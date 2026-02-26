@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import altair as alt
@@ -8,15 +8,19 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from engine.core.advanced import allocate_goal, aggregate_states
+from engine.core.advanced import aggregate_states
+from engine.core.buckets import build_bucket_summary
 from engine.core.derive_states import derive_states_from_primary
+from engine.core.milestones import incremental_time_milestones, target_milestones
 from engine.core.primary import build_primary_daily
 from engine.core.series_ops import scale_series
-from engine.core.solvers import solve_lsfv_fixed_sites, solve_sites_fixed_timeline
-from engine.core.targets import ValidationError, derive_targets
-from engine.core.run_simple import run_simple_scenario
+from engine.core.solvers import SolveResult, solve_lsfv_fixed_sites
+from engine.core.targets import ValidationError
+from engine.core.timelines import derive_state_timelines
+from engine.models.results import ScenarioRunResult
 from engine.models.scenario import ScenarioInputs
 from engine.models.settings import GlobalSettings
+from engine.models.types import Targets
 from export.advanced_pdf import build_advanced_pdf
 from ui.persistence import dump_advanced_state, from_json_bytes, load_advanced_state, to_json_bytes
 
@@ -24,6 +28,9 @@ from ui.persistence import dump_advanced_state, from_json_bytes, load_advanced_s
 COUNTRY_DATA_PATH = "data/un_members_m49.csv"
 DATE_DISPLAY_FORMAT = "%d-%b-%Y"
 DATE_INPUT_FORMAT = "DD-MM-YYYY"
+ADV_FIXED_DRIVER = "Fixed Sites"
+ADV_DEFAULT_SAR_PCT = [20, 40, 60, 80, 100, 100]
+ADV_DEFAULT_RR_PER_SITE_PER_MONTH = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 
 
 @st.cache_data(show_spinner=False)
@@ -105,17 +112,224 @@ def _one_year_after(d: date) -> date:
         return d.replace(month=2, day=28, year=d.year + 1)
 
 
+def _validate_probability(name: str, value: float) -> None:
+    if value < 0.0 or value >= 1.0:
+        raise ValidationError(f"{name} must be in [0, 1). Got {value!r}.")
+
+
+def _derive_targets_from_primary_target(
+    *,
+    period_type: str,
+    target_n: int,
+    screen_fail_rate: float,
+    discontinuation_rate: float,
+) -> Targets:
+    if target_n <= 0:
+        raise ValidationError("Target N must be a positive integer.")
+
+    _validate_probability("Screen fail rate", float(screen_fail_rate))
+    _validate_probability("Discontinuation rate", float(discontinuation_rate))
+
+    sfr = float(screen_fail_rate)
+    dr = float(discontinuation_rate)
+
+    if period_type == "Screened":
+        screened = float(target_n)
+        randomized = screened * (1.0 - sfr)
+    elif period_type == "Randomized":
+        randomized = float(target_n)
+        screened = randomized / (1.0 - sfr)
+    else:
+        raise ValidationError(f"Unsupported Recruitment Rate type: {period_type!r}")
+
+    completed = randomized * (1.0 - dr)
+    return Targets(screened=screened, randomized=randomized, completed=completed)
+
+
+def _run_fixed_sites_country_scenario(
+    *,
+    name: str,
+    period_type: str,
+    target_n: int,
+    fsfv: date,
+    sites: int,
+    screen_fail_rate: float,
+    discontinuation_rate: float,
+    lag_sr_days: int,
+    lag_rc_days: int,
+    sar_pct: list[float],
+    rr_per_site_per_month: list[float],
+    settings: GlobalSettings,
+) -> ScenarioRunResult:
+    targets = _derive_targets_from_primary_target(
+        period_type=period_type,
+        target_n=target_n,
+        screen_fail_rate=screen_fail_rate,
+        discontinuation_rate=discontinuation_rate,
+    )
+
+    solve = solve_lsfv_fixed_sites(
+        fsfv=fsfv,
+        sites=sites,
+        period_type=period_type,  # type: ignore[arg-type]
+        targets=targets,
+        screen_fail_rate=screen_fail_rate,
+        discontinuation_rate=discontinuation_rate,
+        lag_sr_days=lag_sr_days,
+        lag_rc_days=lag_rc_days,
+        sar_pct=sar_pct,
+        rr_per_site_per_month=rr_per_site_per_month,
+        settings=settings,
+    )
+    if not solve.reached or solve.solved_lsfv is None:
+        raise ValidationError(solve.warning or "Unable to solve LSFV.")
+
+    return _build_country_result_for_lsfv(
+        name=name,
+        period_type=period_type,
+        targets=targets,
+        solved_lsfv=solve.solved_lsfv,
+        fsfv=fsfv,
+        lsfv=solve.solved_lsfv,
+        sites=sites,
+        screen_fail_rate=screen_fail_rate,
+        discontinuation_rate=discontinuation_rate,
+        lag_sr_days=lag_sr_days,
+        lag_rc_days=lag_rc_days,
+        sar_pct=sar_pct,
+        rr_per_site_per_month=rr_per_site_per_month,
+        settings=settings,
+    )
+
+
+def _build_country_result_for_lsfv(
+    *,
+    name: str,
+    period_type: str,
+    targets: Targets,
+    solved_lsfv: date,
+    fsfv: date,
+    lsfv: date,
+    sites: int,
+    screen_fail_rate: float,
+    discontinuation_rate: float,
+    lag_sr_days: int,
+    lag_rc_days: int,
+    sar_pct: list[float],
+    rr_per_site_per_month: list[float],
+    settings: GlobalSettings,
+) -> ScenarioRunResult:
+    primary = build_primary_daily(
+        fsfv=fsfv,
+        lsfv=lsfv,
+        sites=sites,
+        sar_pct=sar_pct,
+        rr_per_site_per_month=rr_per_site_per_month,
+        settings=settings,
+    )
+
+    states = derive_states_from_primary(
+        period_type=period_type,  # type: ignore[arg-type]
+        primary_new=primary.new_primary,
+        screen_fail_rate=screen_fail_rate,
+        discontinuation_rate=discontinuation_rate,
+        lag_sr_days=lag_sr_days,
+        lag_rc_days=lag_rc_days,
+    )
+
+    timelines = derive_state_timelines(
+        fsfv=fsfv,
+        lsfv=lsfv,
+        period_type=period_type,  # type: ignore[arg-type]
+        lag_sr_days=lag_sr_days,
+        lag_rc_days=lag_rc_days,
+    )
+
+    milestones_time = {
+        "Screened": incremental_time_milestones(timelines.screened_fsfv, timelines.screened_lsfv, states.screened.cumulative),
+        "Randomized": incremental_time_milestones(timelines.randomized_fsfv, timelines.randomized_lsfv, states.randomized.cumulative),
+        "Completed": incremental_time_milestones(timelines.completed_fsfv, timelines.completed_lslv, states.completed.cumulative),
+    }
+    milestones_target = {
+        "Screened": target_milestones(states.screened.cumulative, targets.screened),
+        "Randomized": target_milestones(states.randomized.cumulative, targets.randomized),
+        "Completed": target_milestones(states.completed.cumulative, targets.completed),
+    }
+
+    bucket_types = ["year", "quarter", "month", "week"]
+    buckets: dict[str, dict[str, list[dict]]] = {bt: {} for bt in bucket_types}
+    for bt in bucket_types:
+        buckets[bt]["Screened"] = build_bucket_summary(
+            incident=states.screened.incident,
+            cumulative=states.screened.cumulative,
+            active_sites=primary.active_sites,
+            activation_pct=primary.activation_pct,
+            bucket_type=bt,  # type: ignore[arg-type]
+            settings=settings,
+        )
+        buckets[bt]["Randomized"] = build_bucket_summary(
+            incident=states.randomized.incident,
+            cumulative=states.randomized.cumulative,
+            active_sites=primary.active_sites,
+            activation_pct=primary.activation_pct,
+            bucket_type=bt,  # type: ignore[arg-type]
+            settings=settings,
+        )
+        buckets[bt]["Completed"] = build_bucket_summary(
+            incident=states.completed.incident,
+            cumulative=states.completed.cumulative,
+            active_sites=primary.active_sites,
+            activation_pct=primary.activation_pct,
+            bucket_type=bt,  # type: ignore[arg-type]
+            settings=settings,
+        )
+
+    return ScenarioRunResult(
+        inputs_name=name,
+        targets=targets,
+        solve=SolveResult(solved_sites=sites, solved_lsfv=solved_lsfv, reached=True, warning=None),
+        timelines=timelines,
+        primary=primary,
+        states=states,
+        milestones_time=milestones_time,
+        milestones_target=milestones_target,
+        buckets=buckets,
+    )
+
+
+def _milestone_dates(fsfv: date, lsfv: date) -> list[date]:
+    duration = (lsfv - fsfv).days
+    milestones = []
+    for pct in [0, 20, 40, 60, 80, 100]:
+        if duration <= 1:
+            offset = 0
+        else:
+            offset = int((pct / 100.0) * (duration - 1))
+        milestones.append(fsfv + timedelta(days=offset))
+    return milestones
+
+
+def _value_at_or_before(series: dict[date, float], d: date) -> float:
+    if not series:
+        return 0.0
+    if d in series:
+        return float(series[d])
+    eligible = [k for k in series.keys() if k <= d]
+    if not eligible:
+        return 0.0
+    return float(series[max(eligible)])
+
+
 def _init_defaults() -> None:
     today = date.today()
     defaults = {
-        "adv_goal_type": "Randomized",
-        "adv_goal_n": 100,
-        "adv_screen_fail_rate": 0.2,
+        "adv_screen_fail_rate": 0.25,
         "adv_discontinuation_rate": 0.1,
-        "adv_period_type": "Randomized",
-        "adv_driver": "Fixed Timeline",
+        "adv_period_type": "Screened",
+        "_adv_period_picked": False,
+        "adv_driver": ADV_FIXED_DRIVER,
         "adv_lag_sr_days": 14,
-        "adv_lag_rc_days": 60,
+        "adv_lag_rc_days": 30,
         "adv_uncertainty_enabled": False,
         "adv_uncertainty_lower_pct": 10.0,
         "adv_uncertainty_upper_pct": 10.0,
@@ -124,12 +338,13 @@ def _init_defaults() -> None:
         "adv_global_sites": 10,
         "adv_global_sar_pct": [20, 40, 60, 80, 100, 100],
         "adv_global_rr_pct": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-        "adv_selected_countries": [],
+        "adv_selected_countries": ["United States"],
         "adv_country_config": {},
         "adv_map_metric": "Randomized total",
         "adv_map_view": "World",
+        "adv_map_color_scheme": "blues",
         "adv_pie_enabled": False,
-        "adv_pie_scope": "Region",
+        "adv_pie_scope": "Country",
         "adv_pie_metric_family": "Enrollment",
         "adv_pie_state": "Randomized",
         "adv_pie_label_mode": "Both",
@@ -141,7 +356,7 @@ def _init_defaults() -> None:
         st.session_state.setdefault(k, v)
 
     if st.session_state.get("adv_period_type") not in {"Screened", "Randomized"}:
-        st.session_state["adv_period_type"] = "Randomized"
+        st.session_state["adv_period_type"] = "Screened"
 
     st.session_state["adv_initialized"] = True
 
@@ -152,21 +367,21 @@ def _default_country_row(country: dict[str, Any]) -> dict[str, Any]:
         "Country": country["country"],
         "Region": country.get("region", ""),
         "Subregion": country.get("subregion", ""),
-        "FSFV": st.session_state["adv_global_fsfv"],
-        "LSFV": st.session_state["adv_global_lsfv"],
-        "Sites": st.session_state["adv_global_sites"],
-        "SAR_0": st.session_state["adv_global_sar_pct"][0],
-        "SAR_20": st.session_state["adv_global_sar_pct"][1],
-        "SAR_40": st.session_state["adv_global_sar_pct"][2],
-        "SAR_60": st.session_state["adv_global_sar_pct"][3],
-        "SAR_80": st.session_state["adv_global_sar_pct"][4],
-        "SAR_100": st.session_state["adv_global_sar_pct"][5],
-        "RR_0": st.session_state["adv_global_rr_pct"][0],
-        "RR_20": st.session_state["adv_global_rr_pct"][1],
-        "RR_40": st.session_state["adv_global_rr_pct"][2],
-        "RR_60": st.session_state["adv_global_rr_pct"][3],
-        "RR_80": st.session_state["adv_global_rr_pct"][4],
-        "RR_100": st.session_state["adv_global_rr_pct"][5],
+        "FSFV": date.today(),
+        "Sites": 10,
+        "Target N": 10,
+        "SAR_0": ADV_DEFAULT_SAR_PCT[0],
+        "SAR_20": ADV_DEFAULT_SAR_PCT[1],
+        "SAR_40": ADV_DEFAULT_SAR_PCT[2],
+        "SAR_60": ADV_DEFAULT_SAR_PCT[3],
+        "SAR_80": ADV_DEFAULT_SAR_PCT[4],
+        "SAR_100": ADV_DEFAULT_SAR_PCT[5],
+        "RR_0": ADV_DEFAULT_RR_PER_SITE_PER_MONTH[0],
+        "RR_20": ADV_DEFAULT_RR_PER_SITE_PER_MONTH[1],
+        "RR_40": ADV_DEFAULT_RR_PER_SITE_PER_MONTH[2],
+        "RR_60": ADV_DEFAULT_RR_PER_SITE_PER_MONTH[3],
+        "RR_80": ADV_DEFAULT_RR_PER_SITE_PER_MONTH[4],
+        "RR_100": ADV_DEFAULT_RR_PER_SITE_PER_MONTH[5],
     }
 
 
@@ -176,9 +391,31 @@ def _build_country_df(countries_df: pd.DataFrame, selected: list[str]) -> pd.Dat
     rows = []
     for _, row in countries_df[countries_df["country"].isin(selected)].iterrows():
         iso = row["iso3"]
-        if iso not in config:
-            config[iso] = _default_country_row(row.to_dict())
-        rows.append(config[iso])
+        default_row = _default_country_row(row.to_dict())
+        existing_row = config.get(iso, {})
+        merged_row = {**default_row, **existing_row}
+
+        # Compatibility for legacy fixed-timeline rows loaded from older saves.
+        sites = merged_row.get("Sites")
+        if sites is None or (isinstance(sites, float) and pd.isna(sites)):
+            merged_row["Sites"] = 10
+        else:
+            try:
+                merged_row["Sites"] = max(1, int(sites))
+            except Exception:
+                merged_row["Sites"] = 10
+
+        target_n = merged_row.get("Target N")
+        if target_n is None or (isinstance(target_n, float) and pd.isna(target_n)):
+            merged_row["Target N"] = 10
+        else:
+            try:
+                merged_row["Target N"] = max(1, int(target_n))
+            except Exception:
+                merged_row["Target N"] = 10
+
+        config[iso] = merged_row
+        rows.append(merged_row)
 
     # Keep order consistent with selection
     order_map = {name: i for i, name in enumerate(selected)}
@@ -194,15 +431,11 @@ def _update_config_from_df(df: pd.DataFrame) -> None:
         config[iso] = row.to_dict()
 
 
-def _validate_country_rows(df: pd.DataFrame, driver: str) -> list[str]:
+def _validate_country_rows(df: pd.DataFrame) -> list[str]:
     errors: list[str] = []
 
     required_cols = ["FSFV", "SAR_0", "SAR_20", "SAR_40", "SAR_60", "SAR_80", "SAR_100",
-                     "RR_0", "RR_20", "RR_40", "RR_60", "RR_80", "RR_100"]
-    if driver == "Fixed Timeline":
-        required_cols.append("LSFV")
-    else:
-        required_cols.append("Sites")
+                     "RR_0", "RR_20", "RR_40", "RR_60", "RR_80", "RR_100", "Target N", "Sites"]
 
     for _, row in df.iterrows():
         country = row["Country"]
@@ -214,16 +447,12 @@ def _validate_country_rows(df: pd.DataFrame, driver: str) -> list[str]:
         if not isinstance(fsfv, date):
             errors.append(f"{country}: FSFV must be a date.")
 
-        if driver == "Fixed Timeline":
-            lsfv = row["LSFV"]
-            if not isinstance(lsfv, date):
-                errors.append(f"{country}: LSFV must be a date.")
-            elif isinstance(fsfv, date) and lsfv <= fsfv:
-                errors.append(f"{country}: LSFV must be after FSFV.")
-        else:
-            sites = row["Sites"]
-            if pd.isna(sites) or int(sites) != sites or int(sites) <= 0:
-                errors.append(f"{country}: Sites must be a positive integer.")
+        sites = row["Sites"]
+        if pd.isna(sites) or int(sites) != sites or int(sites) <= 0:
+            errors.append(f"{country}: Sites must be a positive integer.")
+        target_n = row["Target N"]
+        if pd.isna(target_n) or int(target_n) != target_n or int(target_n) <= 0:
+            errors.append(f"{country}: Target N must be a positive integer.")
 
         # Validate SAR/RR ranges
         sar_vals = [row[c] for c in ["SAR_0", "SAR_20", "SAR_40", "SAR_60", "SAR_80", "SAR_100"]]
@@ -241,7 +470,7 @@ def _validate_country_rows(df: pd.DataFrame, driver: str) -> list[str]:
     return errors
 
 
-def _extract_country_inputs(df: pd.DataFrame, driver: str) -> dict[str, dict[str, Any]]:
+def _extract_country_inputs(df: pd.DataFrame) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for _, row in df.iterrows():
         iso = row["ISO3"]
@@ -252,33 +481,12 @@ def _extract_country_inputs(df: pd.DataFrame, driver: str) -> dict[str, dict[str
             "region": row.get("Region", ""),
             "subregion": row.get("Subregion", ""),
             "fsfv": row["FSFV"],
-            "lsfv": row["LSFV"] if driver == "Fixed Timeline" else None,
-            "sites": int(row["Sites"]) if driver == "Fixed Sites" else None,
+            "sites": int(row["Sites"]),
+            "target_n": int(row["Target N"]),
             "sar": sar,
             "rr": rr,
         }
     return out
-
-
-def _compute_weights(country_inputs: dict[str, dict[str, Any]], driver: str, settings: GlobalSettings) -> dict[str, float]:
-    weights: dict[str, float] = {}
-    for iso, c in country_inputs.items():
-        if driver == "Fixed Sites":
-            sites = c["sites"]
-            avg_sar = sum(c["sar"]) / len(c["sar"]) / 100.0
-            avg_rr = sum(c["rr"]) / len(c["rr"])
-            weights[iso] = float(sites) * avg_sar * avg_rr
-        else:
-            primary = build_primary_daily(
-                fsfv=c["fsfv"],
-                lsfv=c["lsfv"],
-                sites=1,
-                sar_pct=c["sar"],
-                rr_per_site_per_month=c["rr"],
-                settings=settings,
-            )
-            weights[iso] = sum(primary.new_primary.values())
-    return weights
 
 
 def _build_uncertainty_states(
@@ -324,7 +532,7 @@ def _build_uncertainty_states(
 
 def render() -> None:
     st.title("Recruitment Scenario Planner — Advanced Mode")
-    st.caption("Advanced Mode supports a single scenario with multi-country allocation and roll-up.")
+    st.caption("Advanced Mode supports country-level targets with multi-country roll-up.")
 
     _init_defaults()
 
@@ -338,122 +546,94 @@ def render() -> None:
             st.error(f"Failed to apply loaded file: {e}")
 
     if st.session_state.get("adv_period_type") not in {"Screened", "Randomized"}:
-        st.session_state["adv_period_type"] = "Randomized"
+        st.session_state["adv_period_type"] = "Screened"
+    st.session_state["adv_driver"] = ADV_FIXED_DRIVER
 
     settings = GlobalSettings()
     countries_df = load_countries()
 
-    with st.expander("Global Inputs", expanded=True):
-        gcol1, gcol2, gcol3 = st.columns(3)
-        with gcol1:
-            st.selectbox(
-                "Solve For",
-                ["Randomized", "Completed"],
-                key="adv_goal_type",
-                format_func=lambda v: {"Randomized": "Total Randomized", "Completed": "Total Completed"}[v],
-            )
-            st.number_input("Goal N (global)", min_value=1, step=1, key="adv_goal_n")
-            st.slider("Screen fail rate", 0.0, 0.99, key="adv_screen_fail_rate")
-            st.slider("Discontinuation rate", 0.0, 0.99, key="adv_discontinuation_rate")
+    period_options = ["(select)", "Screened", "Randomized"]
+    if "adv_period_type_picker" not in st.session_state:
+        if st.session_state.get("_adv_period_picked", False) and st.session_state.get("adv_period_type") in {"Screened", "Randomized"}:
+            st.session_state["adv_period_type_picker"] = st.session_state["adv_period_type"]
+        else:
+            st.session_state["adv_period_type_picker"] = "(select)"
 
-        with gcol2:
-            st.selectbox(
-                "Recruitment Rate type (primary)",
-                ["Screened", "Randomized"],
-                key="adv_period_type",
-            )
-            st.selectbox("Driver", ["Fixed Sites", "Fixed Timeline"], key="adv_driver")
-            st.number_input(
-                "Lag Screened → Randomized (days)",
-                min_value=0,
-                step=1,
-                key="adv_lag_sr_days",
-            )
-            st.number_input(
-                "Lag Randomized → Completed (days)",
-                min_value=0,
-                step=1,
-                key="adv_lag_rc_days",
-            )
-
-        with gcol3:
-            st.date_input("Default FSFV", key="adv_global_fsfv", format=DATE_INPUT_FORMAT)
-            if st.session_state["adv_driver"] == "Fixed Timeline":
-                st.date_input("Default LSFV", key="adv_global_lsfv", format=DATE_INPUT_FORMAT)
-            else:
-                st.number_input("Default Sites", min_value=1, step=1, key="adv_global_sites")
-
-        st.markdown("### Global Defaults — Site Activation Rate at % Milestones from FSFV to LSFV")
-        sar_df = pd.DataFrame([st.session_state["adv_global_sar_pct"]], columns=["0%", "20%", "40%", "60%", "80%", "100%"])
-        sar_edit = st.data_editor(sar_df, num_rows="fixed", hide_index=True, key="adv_global_sar_editor")
-        st.session_state["adv_global_sar_pct"] = [float(sar_edit.iloc[0][c]) for c in sar_edit.columns]
-
-        rr_label_map = {
-            "Screened": "screened",
-            "Randomized": "randomized",
-        }
-        rr_label = rr_label_map.get(st.session_state["adv_period_type"], "randomized")
-        st.markdown(f"### Global Defaults — # of subjects {rr_label}/site/month")
-        rr_df = pd.DataFrame([st.session_state["adv_global_rr_pct"]], columns=["0%", "20%", "40%", "60%", "80%", "100%"])
-        rr_edit = st.data_editor(rr_df, num_rows="fixed", hide_index=True, key="adv_global_rr_editor")
-        st.session_state["adv_global_rr_pct"] = [float(rr_edit.iloc[0][c]) for c in rr_edit.columns]
-
-        st.markdown("### Global Uncertainty")
-        ucol1, ucol2, ucol3 = st.columns([1, 1, 1])
-        with ucol1:
-            st.checkbox("Enable uncertainty", key="adv_uncertainty_enabled")
-        with ucol2:
-            st.number_input("Lower % (below)", min_value=0.0, max_value=100.0, step=1.0, key="adv_uncertainty_lower_pct")
-        with ucol3:
-            st.number_input("Upper % (above)", min_value=0.0, max_value=100.0, step=1.0, key="adv_uncertainty_upper_pct")
-
-    with st.expander("Save / Load", expanded=False):
-        save_name = st.text_input("Save name", value="advanced_1", key="adv_save_name")
-        payload = dump_advanced_state(st.session_state)
-        payload["name"] = save_name
-
-        st.download_button(
-            "Download advanced scenario (.json)",
-            data=to_json_bytes(payload),
-            file_name=f"{save_name}.json",
-            mime="application/json",
-        )
-
-        uploaded = st.file_uploader(
-            "Load advanced scenario (.json)",
-            type=["json"],
-            key="adv_uploader",
-        )
-        if uploaded is not None:
-            try:
-                loaded = from_json_bytes(uploaded.read())
-                st.session_state["_adv_pending_load_payload"] = loaded
-                st.session_state["adv_uploader"] = None
-                st.rerun()
-            except Exception as e:
-                st.error(f"Failed to load file: {e}")
-
-    st.subheader("Countries")
-    selected = st.multiselect(
-        "Select countries (1–20)",
-        options=sorted(countries_df["country"].tolist()),
-        key="adv_selected_countries",
+    selected_period = st.selectbox(
+        "Recruitment Rate type (primary)",
+        period_options,
+        key="adv_period_type_picker",
     )
+    period_selected = selected_period in {"Screened", "Randomized"}
+    if period_selected:
+        st.session_state["adv_period_type"] = selected_period
+        st.session_state["_adv_period_picked"] = True
+    else:
+        st.session_state["_adv_period_picked"] = False
 
-    if len(selected) > 20:
-        st.error("Advanced Mode supports up to 20 countries. Remove some selections to proceed.")
+    st.markdown("<p style='font-size:10pt;font-weight:700;margin:0 0 0.35rem 0;'>Countries</p>", unsafe_allow_html=True)
+    country_options = sorted(countries_df["country"].tolist())
 
-    country_df = _build_country_df(countries_df, selected) if selected else pd.DataFrame()
+    def _set_selected_countries(countries: list[str]) -> None:
+        unique = [c for c in dict.fromkeys(countries) if c in country_options]
+        if len(unique) > 20:
+            st.session_state["adv_selected_countries"] = unique[:20]
+            st.session_state["adv_country_selection_notice"] = "Selection was limited to 20 countries."
+        else:
+            st.session_state["adv_selected_countries"] = unique
+            st.session_state.pop("adv_country_selection_notice", None)
 
+    def _clear_selected_countries() -> None:
+        st.session_state["adv_selected_countries"] = []
+        st.session_state.pop("adv_country_selection_notice", None)
+
+    if len(st.session_state.get("adv_selected_countries", [])) > 20:
+        _set_selected_countries(st.session_state.get("adv_selected_countries", []))
+
+    select_col, clear_col = st.columns([5, 1])
+    with select_col:
+        selected = st.multiselect(
+            "Select countries (1–20)",
+            options=country_options,
+            key="adv_selected_countries",
+            max_selections=20,
+            placeholder="Search countries and select up to 20",
+            disabled=not period_selected,
+        )
+    with clear_col:
+        st.button(
+            "Clear all",
+            key="adv_clear_countries",
+            on_click=_clear_selected_countries,
+            disabled=not st.session_state.get("adv_selected_countries"),
+            use_container_width=True,
+        )
+    if "adv_country_selection_notice" in st.session_state:
+        st.info(st.session_state["adv_country_selection_notice"])
+
+    effective_selected = selected if period_selected else []
+
+    if not period_selected:
+        st.info("Select Recruitment Rate type (primary) first to enable country selection.")
+    if period_selected and not effective_selected:
+        st.info("Select at least one country to configure Advanced inputs.")
+
+    country_df = _build_country_df(countries_df, effective_selected) if effective_selected else pd.DataFrame()
+
+    edited_df = pd.DataFrame()
+    run_signature_text: str | None = None
     if not country_df.empty:
-        driver = st.session_state["adv_driver"]
+        target_col_label = (
+            "Target Screened" if st.session_state["adv_period_type"] == "Screened" else "Target Randomized"
+        )
         cols = [
             "ISO3",
             "Country",
             "Region",
             "Subregion",
             "FSFV",
-            "LSFV" if driver == "Fixed Timeline" else "Sites",
+            "Sites",
+            "Target N",
             "SAR_0",
             "SAR_20",
             "SAR_40",
@@ -468,96 +648,170 @@ def render() -> None:
             "RR_100",
         ]
         country_df = country_df[cols]
+        country_df_ui = country_df.rename(columns={"Target N": target_col_label})
 
-        st.markdown("### Country Configuration")
+        st.markdown(
+            "<p style='font-size:10pt;font-weight:700;margin:0.6rem 0 0.35rem 0;'>Country Configuration</p>",
+            unsafe_allow_html=True,
+        )
         column_config = {
             "ISO3": st.column_config.TextColumn(disabled=True),
             "Country": st.column_config.TextColumn(disabled=True),
             "Region": st.column_config.TextColumn(disabled=True),
             "Subregion": st.column_config.TextColumn(disabled=True),
             "FSFV": st.column_config.DateColumn(format=DATE_INPUT_FORMAT),
+            "Sites": st.column_config.NumberColumn(min_value=1, step=1),
+            target_col_label: st.column_config.NumberColumn(min_value=1, step=1),
         }
-        if driver == "Fixed Timeline":
-            column_config["LSFV"] = st.column_config.DateColumn(format=DATE_INPUT_FORMAT)
-        else:
-            column_config["Sites"] = st.column_config.NumberColumn(min_value=1, step=1)
 
-        edited_df = st.data_editor(
-            country_df,
+        period_editor_key = "_adv_last_period_type_for_editor"
+        if st.session_state.get(period_editor_key) != st.session_state["adv_period_type"]:
+            st.session_state.pop("adv_country_editor", None)
+            st.session_state[period_editor_key] = st.session_state["adv_period_type"]
+
+        edited_df_ui = st.data_editor(
+            country_df_ui,
             num_rows="fixed",
             width="stretch",
             key="adv_country_editor",
             column_config=column_config,
         )
+        edited_df = edited_df_ui.rename(columns={target_col_label: "Target N"})
         _update_config_from_df(edited_df)
 
-        errors = _validate_country_rows(edited_df, driver)
+        errors = _validate_country_rows(edited_df)
+        fsfvs = [row["FSFV"] for _, row in edited_df.iterrows() if isinstance(row["FSFV"], date)]
+        if fsfvs:
+            st.info(f"Derived global FSFV (earliest): {_format_date(min(fsfvs))}")
+
+        if "adv_results" in st.session_state:
+            primary_state = "Screened" if st.session_state["adv_period_type"] == "Screened" else "Randomized"
+            milestone_rows = []
+            for country_result in st.session_state["adv_results"].get("countries", []):
+                out = country_result.get("result")
+                if not out:
+                    continue
+                primary_cumulative_series = (
+                    out.states.screened.cumulative if primary_state == "Screened" else out.states.randomized.cumulative
+                )
+                for pct, milestone_date in zip([0, 20, 40, 60, 80, 100], _milestone_dates(out.primary.fsfv, out.primary.lsfv)):
+                    active_sites = float(out.primary.active_sites.get(milestone_date, 0.0))
+                    total_primary_month = float(out.primary.new_primary.get(milestone_date, 0.0)) * settings.days_per_month
+                    rr_per_site_month = total_primary_month / active_sites if active_sites > 0 else 0.0
+                    milestone_rows.append(
+                        {
+                            "Country": country_result["country"],
+                            "Milestone %": pct,
+                            "Milestone Date": milestone_date,
+                            "SAR % (input milestone)": out.primary.activation_pct.get(milestone_date, 0.0),
+                            f"RR {primary_state}/site/month (input milestone)": rr_per_site_month,
+                            f"Incident {primary_state}/month (RR milestone)": total_primary_month,
+                            f"Cumulative {primary_state} (to milestone date)": _value_at_or_before(
+                                primary_cumulative_series, milestone_date
+                            ),
+                            "Active Sites (SAR milestone)": active_sites,
+                        }
+                    )
+            if milestone_rows:
+                st.markdown("### Country SAR/RR Milestone Outputs")
+                milestone_df = pd.DataFrame(milestone_rows)
+                milestone_df = _format_dataframe_dates(milestone_df)
+                milestone_df = _format_dataframe_numbers(milestone_df)
+                st.dataframe(milestone_df, width="stretch")
     else:
         errors = []
 
-    if selected and not country_df.empty:
-        fsfvs = [row["FSFV"] for _, row in country_df.iterrows() if isinstance(row["FSFV"], date)]
-        if fsfvs:
-            st.info(f"Derived global FSFV (earliest): {_format_date(min(fsfvs))}")
+    if effective_selected:
+        with st.expander("Global Inputs", expanded=True):
+            gcol1, gcol2, gcol3, gcol4 = st.columns(4)
+            with gcol1:
+                st.number_input(
+                    "Lag Screened → Randomized (days)",
+                    min_value=0,
+                    step=1,
+                    key="adv_lag_sr_days",
+                )
+            with gcol2:
+                st.slider("Screen fail rate", 0.0, 0.99, key="adv_screen_fail_rate")
+            with gcol3:
+                st.number_input(
+                    "Lag Randomized → Completed (days)",
+                    min_value=0,
+                    step=1,
+                    key="adv_lag_rc_days",
+                )
+            with gcol4:
+                st.slider("Discontinuation rate", 0.0, 0.99, key="adv_discontinuation_rate")
+
+            st.markdown(
+                "<p style='font-size:10pt;font-weight:700;margin:0.6rem 0 0.35rem 0;'>Global Uncertainty</p>",
+                unsafe_allow_html=True,
+            )
+            ucol1, ucol2, ucol3 = st.columns([1, 1, 1])
+            with ucol1:
+                st.checkbox("Enable uncertainty", key="adv_uncertainty_enabled")
+            with ucol2:
+                st.number_input(
+                    "Lower % (below)",
+                    min_value=0.0,
+                    max_value=100.0,
+                    step=1.0,
+                    key="adv_uncertainty_lower_pct",
+                )
+            with ucol3:
+                st.number_input(
+                    "Upper % (above)",
+                    min_value=0.0,
+                    max_value=100.0,
+                    step=1.0,
+                    key="adv_uncertainty_upper_pct",
+                )
+
+    if not edited_df.empty:
+        run_signature_text = (
+            f"{edited_df.to_json(date_format='iso', orient='split')}|"
+            f"{st.session_state['adv_period_type']}|"
+            f"{st.session_state['adv_lag_sr_days']}|{st.session_state['adv_lag_rc_days']}|"
+            f"{st.session_state['adv_screen_fail_rate']}|{st.session_state['adv_discontinuation_rate']}"
+        )
+        if "adv_results" in st.session_state:
+            last_run_signature = st.session_state.get("_adv_last_run_signature")
+            if last_run_signature and last_run_signature != run_signature_text:
+                st.session_state["_adv_results_stale"] = True
 
     if errors:
         st.error("Please fix the following before running:")
         for e in errors:
             st.write(f"- {e}")
 
-    can_run = bool(selected) and not errors and len(selected) <= 20
+    if st.session_state.get("_adv_results_stale", False):
+        st.warning("Current results are stale due to input changes. Re-run Advanced Scenario to refresh outputs.")
 
-    if can_run and st.session_state["adv_goal_n"] < len(selected):
-        st.error("Goal N must be at least the number of selected countries to allocate minimum 1 per country.")
-        can_run = False
+    can_run = period_selected and bool(effective_selected) and not errors and len(effective_selected) <= 20 and not edited_df.empty
 
     if st.button("Run Advanced Scenario", type="primary", disabled=not can_run):
         try:
-            driver = st.session_state["adv_driver"]
-            country_inputs = _extract_country_inputs(edited_df, driver)
-
-            weights = _compute_weights(country_inputs, driver, settings)
-            allocation = allocate_goal(int(st.session_state["adv_goal_n"]), weights)
+            country_inputs = _extract_country_inputs(edited_df)
 
             results = []
             warnings = []
 
             for iso, c in country_inputs.items():
-                allocated = allocation.allocations.get(iso, 0)
-                if allocated <= 0:
-                    results.append({
-                        "iso3": iso,
-                        "country": c["country"],
-                        "region": c["region"],
-                        "subregion": c["subregion"],
-                        "status": "failed",
-                        "warning": "Allocated target is 0.",
-                        "result": None,
-                        "uncertainty": None,
-                        "optimistic_solve": None,
-                        "pessimistic_solve": None,
-                    })
-                    continue
-
-                inputs = ScenarioInputs(
-                    name=c["country"],
-                    goal_type=st.session_state["adv_goal_type"],
-                    goal_n=int(allocated),
-                    screen_fail_rate=float(st.session_state["adv_screen_fail_rate"]),
-                    discontinuation_rate=float(st.session_state["adv_discontinuation_rate"]),
-                    period_type=st.session_state["adv_period_type"],
-                    driver=driver,
-                    fsfv=c["fsfv"],
-                    lsfv=c["lsfv"] if driver == "Fixed Timeline" else None,
-                    sites=c["sites"] if driver == "Fixed Sites" else None,
-                    lag_sr_days=int(st.session_state["adv_lag_sr_days"]),
-                    lag_rc_days=int(st.session_state["adv_lag_rc_days"]),
-                    sar_pct=c["sar"],
-                    rr_per_site_per_month=c["rr"],
-                )
-
                 try:
-                    result = run_simple_scenario(inputs, settings)
+                    result = _run_fixed_sites_country_scenario(
+                        name=c["country"],
+                        period_type=st.session_state["adv_period_type"],
+                        target_n=int(c["target_n"]),
+                        fsfv=c["fsfv"],
+                        sites=int(c["sites"]),
+                        screen_fail_rate=float(st.session_state["adv_screen_fail_rate"]),
+                        discontinuation_rate=float(st.session_state["adv_discontinuation_rate"]),
+                        lag_sr_days=int(st.session_state["adv_lag_sr_days"]),
+                        lag_rc_days=int(st.session_state["adv_lag_rc_days"]),
+                        sar_pct=c["sar"],
+                        rr_per_site_per_month=c["rr"],
+                        settings=settings,
+                    )
                     status = "ok"
                     warning = None
                 except ValidationError as e:
@@ -573,92 +827,69 @@ def render() -> None:
                     lower_pct = float(st.session_state["adv_uncertainty_lower_pct"])
                     upper_pct = float(st.session_state["adv_uncertainty_upper_pct"])
 
-                    # Uncertainty bands on states (use baseline solved timeline/sites)
-                    lsfv_primary = result.solve.solved_lsfv if driver == "Fixed Sites" else inputs.lsfv
-                    sites_primary = result.solve.solved_sites if driver == "Fixed Timeline" else inputs.sites
-                    if lsfv_primary is None or sites_primary is None:
-                        raise ValidationError("Unable to compute uncertainty bands (missing LSFV or sites).")
-
+                    uncertainty_inputs = ScenarioInputs(
+                        name=c["country"],
+                        goal_type="Randomized",
+                        goal_n=int(c["target_n"]),
+                        screen_fail_rate=float(st.session_state["adv_screen_fail_rate"]),
+                        discontinuation_rate=float(st.session_state["adv_discontinuation_rate"]),
+                        period_type=st.session_state["adv_period_type"],  # type: ignore[arg-type]
+                        driver=ADV_FIXED_DRIVER,
+                        fsfv=c["fsfv"],
+                        lsfv=None,
+                        sites=int(c["sites"]),
+                        lag_sr_days=int(st.session_state["adv_lag_sr_days"]),
+                        lag_rc_days=int(st.session_state["adv_lag_rc_days"]),
+                        sar_pct=c["sar"],
+                        rr_per_site_per_month=c["rr"],
+                    )
                     lower_states, upper_states = _build_uncertainty_states(
-                        inputs,
+                        uncertainty_inputs,
                         settings,
                         lower_pct,
                         upper_pct,
-                        lsfv=lsfv_primary,
-                        sites=sites_primary,
+                        lsfv=result.primary.lsfv,
+                        sites=result.primary.sites,
                     )
 
-                    # Uncertainty solves
-                    targets = derive_targets(
-                        inputs.goal_type,
-                        inputs.goal_n,
-                        inputs.screen_fail_rate,
-                        inputs.discontinuation_rate,
+                    targets = _derive_targets_from_primary_target(
+                        period_type=st.session_state["adv_period_type"],
+                        target_n=int(c["target_n"]),
+                        screen_fail_rate=float(st.session_state["adv_screen_fail_rate"]),
+                        discontinuation_rate=float(st.session_state["adv_discontinuation_rate"]),
                     )
-                    if driver == "Fixed Sites":
-                        pessimistic_solve = solve_lsfv_fixed_sites(
-                            fsfv=inputs.fsfv,
-                            sites=inputs.sites or 1,
-                            period_type=inputs.period_type,
-                            targets=targets,
-                            screen_fail_rate=inputs.screen_fail_rate,
-                            discontinuation_rate=inputs.discontinuation_rate,
-                            lag_sr_days=inputs.lag_sr_days,
-                            lag_rc_days=inputs.lag_rc_days,
-                            sar_pct=inputs.sar_pct,
-                            rr_per_site_per_month=inputs.rr_per_site_per_month,
-                            settings=settings,
-                            throughput_multiplier=max(0.0, 1.0 - lower_pct / 100.0),
-                        )
-                        optimistic_solve = solve_lsfv_fixed_sites(
-                            fsfv=inputs.fsfv,
-                            sites=inputs.sites or 1,
-                            period_type=inputs.period_type,
-                            targets=targets,
-                            screen_fail_rate=inputs.screen_fail_rate,
-                            discontinuation_rate=inputs.discontinuation_rate,
-                            lag_sr_days=inputs.lag_sr_days,
-                            lag_rc_days=inputs.lag_rc_days,
-                            sar_pct=inputs.sar_pct,
-                            rr_per_site_per_month=inputs.rr_per_site_per_month,
-                            settings=settings,
-                            throughput_multiplier=1.0 + upper_pct / 100.0,
-                        )
-                    else:
-                        pessimistic_solve = solve_sites_fixed_timeline(
-                            fsfv=inputs.fsfv,
-                            lsfv=inputs.lsfv or inputs.fsfv,
-                            period_type=inputs.period_type,
-                            targets=targets,
-                            screen_fail_rate=inputs.screen_fail_rate,
-                            discontinuation_rate=inputs.discontinuation_rate,
-                            lag_sr_days=inputs.lag_sr_days,
-                            lag_rc_days=inputs.lag_rc_days,
-                            sar_pct=inputs.sar_pct,
-                            rr_per_site_per_month=inputs.rr_per_site_per_month,
-                            settings=settings,
-                            throughput_multiplier=max(0.0, 1.0 - lower_pct / 100.0),
-                        )
-                        optimistic_solve = solve_sites_fixed_timeline(
-                            fsfv=inputs.fsfv,
-                            lsfv=inputs.lsfv or inputs.fsfv,
-                            period_type=inputs.period_type,
-                            targets=targets,
-                            screen_fail_rate=inputs.screen_fail_rate,
-                            discontinuation_rate=inputs.discontinuation_rate,
-                            lag_sr_days=inputs.lag_sr_days,
-                            lag_rc_days=inputs.lag_rc_days,
-                            sar_pct=inputs.sar_pct,
-                            rr_per_site_per_month=inputs.rr_per_site_per_month,
-                            settings=settings,
-                            throughput_multiplier=1.0 + upper_pct / 100.0,
-                        )
-
+                    pessimistic_solve = solve_lsfv_fixed_sites(
+                        fsfv=c["fsfv"],
+                        sites=int(c["sites"]),
+                        period_type=st.session_state["adv_period_type"],  # type: ignore[arg-type]
+                        targets=targets,
+                        screen_fail_rate=float(st.session_state["adv_screen_fail_rate"]),
+                        discontinuation_rate=float(st.session_state["adv_discontinuation_rate"]),
+                        lag_sr_days=int(st.session_state["adv_lag_sr_days"]),
+                        lag_rc_days=int(st.session_state["adv_lag_rc_days"]),
+                        sar_pct=c["sar"],
+                        rr_per_site_per_month=c["rr"],
+                        settings=settings,
+                        throughput_multiplier=max(0.0, 1.0 - lower_pct / 100.0),
+                    )
+                    optimistic_solve = solve_lsfv_fixed_sites(
+                        fsfv=c["fsfv"],
+                        sites=int(c["sites"]),
+                        period_type=st.session_state["adv_period_type"],  # type: ignore[arg-type]
+                        targets=targets,
+                        screen_fail_rate=float(st.session_state["adv_screen_fail_rate"]),
+                        discontinuation_rate=float(st.session_state["adv_discontinuation_rate"]),
+                        lag_sr_days=int(st.session_state["adv_lag_sr_days"]),
+                        lag_rc_days=int(st.session_state["adv_lag_rc_days"]),
+                        sar_pct=c["sar"],
+                        rr_per_site_per_month=c["rr"],
+                        settings=settings,
+                        throughput_multiplier=1.0 + upper_pct / 100.0,
+                    )
                     uncertainty = {
                         "lower_states": lower_states,
                         "upper_states": upper_states,
                     }
-
                     if pessimistic_solve and not pessimistic_solve.reached:
                         warnings.append(f"{c['country']}: pessimistic solve unreachable within guardrails.")
 
@@ -667,6 +898,8 @@ def render() -> None:
                     "country": c["country"],
                     "region": c["region"],
                     "subregion": c["subregion"],
+                    "input_config": c,
+                    "input_target_n": int(c["target_n"]),
                     "status": status,
                     "warning": warning,
                     "result": result,
@@ -675,7 +908,70 @@ def render() -> None:
                     "pessimistic_solve": pessimistic_solve,
                 })
 
-            # Aggregate global
+            ok_results = [r for r in results if r["status"] == "ok" and r["result"]]
+            solved_lsfv_values = [
+                r["result"].solve.solved_lsfv
+                for r in ok_results
+                if r["result"] and r["result"].solve.solved_lsfv is not None
+            ]
+            latest_solved_lsfv = max(solved_lsfv_values) if solved_lsfv_values else None
+
+            # Competitive recruitment behavior: once open, a country remains active
+            # until the latest solved LSFV across the selected countries.
+            if latest_solved_lsfv is not None:
+                for r in results:
+                    out = r.get("result")
+                    if not out:
+                        continue
+                    input_cfg = r.get("input_config", {})
+                    if latest_solved_lsfv > out.primary.lsfv:
+                        r["result"] = _build_country_result_for_lsfv(
+                            name=r["country"],
+                            period_type=st.session_state["adv_period_type"],
+                            targets=out.targets,
+                            solved_lsfv=out.solve.solved_lsfv or out.primary.lsfv,
+                            fsfv=input_cfg.get("fsfv", out.primary.fsfv),
+                            lsfv=latest_solved_lsfv,
+                            sites=int(input_cfg.get("sites", out.primary.sites)),
+                            screen_fail_rate=float(st.session_state["adv_screen_fail_rate"]),
+                            discontinuation_rate=float(st.session_state["adv_discontinuation_rate"]),
+                            lag_sr_days=int(st.session_state["adv_lag_sr_days"]),
+                            lag_rc_days=int(st.session_state["adv_lag_rc_days"]),
+                            sar_pct=list(input_cfg.get("sar", [20, 40, 60, 80, 100, 100])),
+                            rr_per_site_per_month=list(input_cfg.get("rr", [1.0, 1.0, 1.0, 1.0, 1.0, 1.0])),
+                            settings=settings,
+                        )
+
+                    if st.session_state["adv_uncertainty_enabled"] and r.get("uncertainty") is not None:
+                        uncertainty_inputs = ScenarioInputs(
+                            name=r["country"],
+                            goal_type="Randomized",
+                            goal_n=int(r.get("input_target_n", 1)),
+                            screen_fail_rate=float(st.session_state["adv_screen_fail_rate"]),
+                            discontinuation_rate=float(st.session_state["adv_discontinuation_rate"]),
+                            period_type=st.session_state["adv_period_type"],  # type: ignore[arg-type]
+                            driver=ADV_FIXED_DRIVER,
+                            fsfv=input_cfg.get("fsfv", out.primary.fsfv),
+                            lsfv=None,
+                            sites=int(input_cfg.get("sites", out.primary.sites)),
+                            lag_sr_days=int(st.session_state["adv_lag_sr_days"]),
+                            lag_rc_days=int(st.session_state["adv_lag_rc_days"]),
+                            sar_pct=list(input_cfg.get("sar", [20, 40, 60, 80, 100, 100])),
+                            rr_per_site_per_month=list(input_cfg.get("rr", [1.0, 1.0, 1.0, 1.0, 1.0, 1.0])),
+                        )
+                        lower_states, upper_states = _build_uncertainty_states(
+                            uncertainty_inputs,
+                            settings,
+                            float(st.session_state["adv_uncertainty_lower_pct"]),
+                            float(st.session_state["adv_uncertainty_upper_pct"]),
+                            lsfv=latest_solved_lsfv,
+                            sites=int(input_cfg.get("sites", out.primary.sites)),
+                        )
+                        r["uncertainty"] = {
+                            "lower_states": lower_states,
+                            "upper_states": upper_states,
+                        }
+
             ok_results = [r for r in results if r["status"] == "ok" and r["result"]]
             global_states = aggregate_states([r["result"].states for r in ok_results]) if ok_results else None
 
@@ -689,10 +985,7 @@ def render() -> None:
                         "upper": aggregate_states(upper_sets),
                     }
 
-            # Global LSLV = latest country LSLV
-            lslv_values = []
-            for r in ok_results:
-                lslv_values.append(r["result"].timelines.completed_lslv)
+            lslv_values = [r["result"].timelines.completed_lslv for r in ok_results]
             global_lslv = max(lslv_values) if lslv_values else None
 
             st.session_state["adv_results"] = {
@@ -700,9 +993,11 @@ def render() -> None:
                 "global_states": global_states,
                 "global_uncertainty": global_uncertainty,
                 "global_lslv": global_lslv,
-                "allocation": allocation,
                 "warnings": warnings,
             }
+            st.session_state["_adv_results_stale"] = False
+            if run_signature_text is not None:
+                st.session_state["_adv_last_run_signature"] = run_signature_text
 
             st.success("Advanced scenario run complete.")
         except Exception as e:
@@ -715,50 +1010,115 @@ def render() -> None:
             for w in res["warnings"]:
                 st.warning(w)
 
-        st.markdown("## Country Summary")
-        driver = st.session_state["adv_driver"]
-
-        def _format_solve(solve, field: str):
-            if solve is None:
-                return None
-            if not solve.reached:
-                return "unreachable"
-            val = getattr(solve, field, None)
-            if isinstance(val, date):
-                return _format_date(val)
-            return val
-
-        rows = []
+        primary_state = "Screened" if st.session_state["adv_period_type"] == "Screened" else "Randomized"
+        run_input_rows = []
         for r in res["countries"]:
-            if r["result"]:
-                out = r["result"]
-                rows.append({
+            out = r.get("result")
+            if not out:
+                continue
+            solved_lsfv = out.solve.solved_lsfv or out.primary.lsfv
+            solved_endpoint = solved_lsfv - timedelta(days=1)
+            cumulative_primary_solved = (
+                _value_at_or_before(out.states.screened.cumulative, solved_endpoint)
+                if primary_state == "Screened"
+                else _value_at_or_before(out.states.randomized.cumulative, solved_endpoint)
+            )
+            run_input_rows.append(
+                {
+                    "Country": r["country"],
+                    f"Input Target {primary_state} (used)": r.get("input_target_n"),
+                    f"Cumulative {primary_state} at Solved LSFV": cumulative_primary_solved,
+                    "Sites (used)": out.primary.sites,
+                    "FSFV (used)": out.primary.fsfv,
+                    "LSFV (solved target)": solved_lsfv,
+                    "Enrollment End LSFV": out.primary.lsfv,
+                }
+            )
+        if run_input_rows:
+            st.markdown("## Run Inputs Used")
+            run_input_df = pd.DataFrame(run_input_rows)
+            run_input_df = _format_dataframe_dates(run_input_df)
+            run_input_df = _format_dataframe_numbers(run_input_df)
+            st.dataframe(run_input_df, width="stretch")
+
+        st.markdown("## Country Summary")
+        target_input_col = f"Input Target {primary_state}"
+        cumulative_primary_col = f"Cumulative {primary_state} at Solved LSFV"
+        rows = []
+        totals = {
+            "screened_100": 0.0,
+            "randomized_100": 0.0,
+            "completed_100": 0.0,
+            "sites_100": 0.0,
+            "input_target_n": 0.0,
+        }
+        fsfv_values: list[date] = []
+        fslv_values: list[date] = []
+        lsfv_values: list[date] = []
+        lslv_values: list[date] = []
+
+        for r in res["countries"]:
+            out = r.get("result")
+            if not out:
+                continue
+
+            solved_endpoint = out.primary.lsfv - timedelta(days=1)
+            total_screened_100 = _value_at_or_before(out.states.screened.cumulative, solved_endpoint)
+            total_randomized_100 = _value_at_or_before(out.states.randomized.cumulative, solved_endpoint)
+            total_completed_100 = _value_at_or_before(out.states.completed.cumulative, solved_endpoint)
+            total_sites_100 = _value_at_or_before(out.primary.active_sites, solved_endpoint)
+            primary_cumulative_solved = total_screened_100 if primary_state == "Screened" else total_randomized_100
+
+            totals["screened_100"] += total_screened_100
+            totals["randomized_100"] += total_randomized_100
+            totals["completed_100"] += total_completed_100
+            totals["sites_100"] += total_sites_100
+            totals["input_target_n"] += float(r.get("input_target_n", 0.0))
+            fsfv_values.append(out.primary.fsfv)
+            fslv_values.append(out.timelines.completed_fsfv)
+            lsfv_values.append(out.primary.lsfv)
+            lslv_values.append(out.timelines.completed_lslv)
+
+            rows.append(
+                {
                     "Country": r["country"],
                     "Region": r["region"],
-                    "Target (Randomized)": round(out.targets.randomized),
-                    "Target (Completed)": round(out.targets.completed),
-                    "Solved Sites": out.solve.solved_sites,
-                    "Solved LSFV": out.solve.solved_lsfv,
+                    target_input_col: r.get("input_target_n"),
+                    cumulative_primary_col: primary_cumulative_solved,
+                    "Total Screened at RR = 100": total_screened_100,
+                    "Total Randomized at RR = 100": total_randomized_100,
+                    "Total Completed at RR = 100": total_completed_100,
+                    "Total Sites at SAR = 100": total_sites_100,
+                    "FSFV": out.primary.fsfv,
+                    "FSLV": out.timelines.completed_fsfv,
+                    "LSFV": out.solve.solved_lsfv or out.primary.lsfv,
+                    "Enrollment End LSFV": out.primary.lsfv,
                     "LSLV": out.timelines.completed_lslv,
-                    "Pessimistic Solve": _format_solve(r["pessimistic_solve"], "solved_lsfv" if driver == "Fixed Sites" else "solved_sites"),
-                    "Optimistic Solve": _format_solve(r["optimistic_solve"], "solved_lsfv" if driver == "Fixed Sites" else "solved_sites"),
                     "Status": r["status"],
-                    "Warning": r["warning"],
-                })
-            else:
-                rows.append({
-                    "Country": r["country"],
-                    "Region": r["region"],
-                    "Target (Randomized)": None,
-                    "Target (Completed)": None,
-                    "Solved Sites": None,
-                    "Solved LSFV": None,
-                    "LSLV": None,
-                    "Pessimistic Solve": None,
-                    "Optimistic Solve": None,
-                    "Status": r["status"],
-                    "Warning": r["warning"],
-                })
+                }
+            )
+
+        if rows:
+            rows.append(
+                {
+                    "Country": "Global",
+                    "Region": "-",
+                    target_input_col: totals["input_target_n"],
+                    cumulative_primary_col: totals["screened_100"] if primary_state == "Screened" else totals["randomized_100"],
+                    "Total Screened at RR = 100": totals["screened_100"],
+                    "Total Randomized at RR = 100": totals["randomized_100"],
+                    "Total Completed at RR = 100": totals["completed_100"],
+                    "Total Sites at SAR = 100": totals["sites_100"],
+                    "FSFV": min(fsfv_values) if fsfv_values else None,
+                    "FSLV": min(fslv_values) if fslv_values else None,
+                    "LSFV": max(
+                        [(row["result"].solve.solved_lsfv or row["result"].primary.lsfv) for row in res["countries"] if row.get("result")]
+                    ) if rows else None,
+                    "Enrollment End LSFV": max(lsfv_values) if lsfv_values else None,
+                    "LSLV": max(lslv_values) if lslv_values else None,
+                    "Status": "ok",
+                }
+            )
 
         summary_df = pd.DataFrame(rows)
         summary_df = _format_dataframe_dates(summary_df)
@@ -933,7 +1293,7 @@ def render() -> None:
             # Site activation chart
             st.markdown("### Site Activation Over Time")
             global_sites_color = st.color_picker(
-                "Global cumulative active sites line",
+                "Global active sites line",
                 value=st.session_state.get("adv_global_sites_line_color", "#1b9e77"),
                 key="adv_global_sites_line_color",
             )
@@ -949,7 +1309,13 @@ def render() -> None:
                     }
                 ).sort_values("date")
                 df_sites["month"] = df_sites["date"].apply(lambda d: date(d.year, d.month, 1))
-                monthly = df_sites.groupby("month", as_index=False)["active_sites"].mean()
+                # Use first available day in each month so the first displayed point
+                # aligns with FSFV (0% milestone) for that country.
+                monthly = (
+                    df_sites.groupby("month", as_index=False)
+                    .agg(active_sites=("active_sites", "first"))
+                    .sort_values("month")
+                )
                 monthly["country"] = r["country"]
                 monthly_rows.append(monthly)
 
@@ -958,10 +1324,9 @@ def render() -> None:
                 global_monthly = (
                     bars_df.groupby("month", as_index=False)["active_sites"]
                     .sum()
-                    .rename(columns={"active_sites": "global_active_sites"})
+                    .rename(columns={"active_sites": "global_active_sites_snapshot"})
                     .sort_values("month")
                 )
-                global_monthly["cumulative_active_sites"] = global_monthly["global_active_sites"].cumsum()
 
                 domain_min = bars_df["month"].min()
                 if res.get("global_lslv"):
@@ -984,7 +1349,7 @@ def render() -> None:
                             axis=alt.Axis(format=DATE_DISPLAY_FORMAT),
                         ),
                         xOffset=alt.XOffset("country:N"),
-                        y=alt.Y("active_sites:Q", title="Avg Active Sites"),
+                        y=alt.Y("active_sites:Q", title="Active Sites (Month Start Snapshot)"),
                         color=alt.Color(
                             "country:N",
                             title="Country",
@@ -993,7 +1358,7 @@ def render() -> None:
                         tooltip=[
                             alt.Tooltip("month:T", title="Month", format=DATE_DISPLAY_FORMAT),
                             alt.Tooltip("country:N", title="Country"),
-                            alt.Tooltip("active_sites:Q", title="Avg Active Sites", format=".1f"),
+                            alt.Tooltip("active_sites:Q", title="Active Sites", format=".1f"),
                         ],
                     )
                 )
@@ -1008,12 +1373,12 @@ def render() -> None:
                             axis=alt.Axis(format=DATE_DISPLAY_FORMAT),
                         ),
                         y=alt.Y(
-                            "cumulative_active_sites:Q",
-                            axis=alt.Axis(title="Cumulative Active Sites", orient="right"),
+                            "global_active_sites_snapshot:Q",
+                            axis=alt.Axis(title="Global Active Sites", orient="right"),
                         ),
                         tooltip=[
                             alt.Tooltip("month:T", title="Month", format=DATE_DISPLAY_FORMAT),
-                            alt.Tooltip("cumulative_active_sites:Q", title="Cumulative Active Sites", format=".1f"),
+                            alt.Tooltip("global_active_sites_snapshot:Q", title="Global Active Sites", format=".1f"),
                         ],
                     )
                 )
@@ -1045,7 +1410,6 @@ def render() -> None:
                 index=default_index,
                 key="adv_selected_country",
             )
-            sel_state = st.selectbox("State", ["Screened", "Randomized", "Completed"], key="adv_country_state")
             country_map = {r["country"]: r for r in ok_results}
             country_result = country_map.get(sel_country)
             if not country_result:
@@ -1053,16 +1417,16 @@ def render() -> None:
                 country_result = ok_results[0]
             out = country_result["result"]
 
-            series = {
+            state_series_map = {
                 "Screened": out.states.screened.cumulative,
                 "Randomized": out.states.randomized.cumulative,
                 "Completed": out.states.completed.cumulative,
-            }[sel_state]
-
-            df = pd.DataFrame({"date": list(series.keys()), "value": list(series.values())}).sort_values("date")
-            df["state"] = sel_state
-
-            layers = []
+            }
+            rows = []
+            for state_name, series in state_series_map.items():
+                for d, v in series.items():
+                    rows.append({"date": d, "value": v, "state": state_name})
+            df = pd.DataFrame(rows).sort_values("date")
             domain_min = _coerce_to_date(df["date"].min())
             domain_max = _coerce_to_date(out.timelines.completed_lslv + pd.Timedelta(days=30))
             country_range_key = "adv_country_curve_date_range"
@@ -1070,37 +1434,9 @@ def render() -> None:
             country_range_start, country_range_end = _resolve_date_range(
                 selected_country_range, domain_min, domain_max
             )
-            if country_result["uncertainty"]:
-                lower = {
-                    "Screened": country_result["uncertainty"]["lower_states"].screened.cumulative,
-                    "Randomized": country_result["uncertainty"]["lower_states"].randomized.cumulative,
-                    "Completed": country_result["uncertainty"]["lower_states"].completed.cumulative,
-                }[sel_state]
-                upper = {
-                    "Screened": country_result["uncertainty"]["upper_states"].screened.cumulative,
-                    "Randomized": country_result["uncertainty"]["upper_states"].randomized.cumulative,
-                    "Completed": country_result["uncertainty"]["upper_states"].completed.cumulative,
-                }[sel_state]
-                df_band = pd.DataFrame({
-                    "date": list(lower.keys()),
-                    "lower": list(lower.values()),
-                    "upper": [upper.get(d, 0.0) for d in lower.keys()],
-                }).sort_values("date")
-                layers.append(
-                    alt.Chart(df_band)
-                    .mark_area(opacity=0.18)
-                    .encode(
-                        x=alt.X(
-                            "date:T",
-                            scale=alt.Scale(domain=[country_range_start, country_range_end]),
-                            axis=alt.Axis(format=DATE_DISPLAY_FORMAT),
-                        ),
-                        y="lower:Q",
-                        y2="upper:Q",
-                    )
-                )
-
-            layers.append(
+            state_domain = ["Screened", "Randomized", "Completed"]
+            state_colors = ["#09CFEA", "#2CA02C", "#FF7F0E"]
+            st.altair_chart(
                 alt.Chart(df)
                 .mark_line()
                 .encode(
@@ -1109,14 +1445,21 @@ def render() -> None:
                         scale=alt.Scale(domain=[country_range_start, country_range_end]),
                         axis=alt.Axis(format=DATE_DISPLAY_FORMAT),
                     ),
-                    y="value:Q",
+                    y=alt.Y("value:Q", title="Cumulative # of Subjects"),
+                    color=alt.Color(
+                        "state:N",
+                        title="# of Subjects",
+                        scale=alt.Scale(domain=state_domain, range=state_colors),
+                    ),
                     tooltip=[
                         alt.Tooltip("date:T", title="Date", format=DATE_DISPLAY_FORMAT),
+                        alt.Tooltip("state:N", title="State"),
                         alt.Tooltip("value:Q", title="Cumulative", format=".1f"),
                     ],
                 )
+                .properties(height=320),
+                width="stretch",
             )
-            st.altair_chart(alt.layer(*layers).properties(height=320), width="stretch")
             st.slider(
                 "X-axis date range",
                 min_value=domain_min,
@@ -1129,27 +1472,50 @@ def render() -> None:
 
         # Map + pie
         st.markdown("## Map View")
-        metric = st.selectbox(
-            "Heat map metric",
-            [
-                "Randomized total",
-                "Completed total",
-                "Screened total",
-                "Sites",
-                "Randomized % of global",
-                "Completed % of global",
-                "Screened % of global",
-            ],
-            key="adv_map_metric",
-        )
-        view = st.selectbox(
-            "Map view",
-            ["World"] + sorted(countries_df["region"].dropna().unique().tolist()),
-            key="adv_map_view",
-        )
+        map_control_col1, map_control_col2, map_control_col3 = st.columns(3)
+        with map_control_col1:
+            metric = st.selectbox(
+                "Heat map metric",
+                [
+                    "Randomized total",
+                    "Completed total",
+                    "Screened total",
+                    "Sites",
+                    "Randomized % of global",
+                    "Completed % of global",
+                    "Screened % of global",
+                ],
+                key="adv_map_metric",
+            )
+        with map_control_col2:
+            view = st.selectbox(
+                "Map view",
+                ["World"] + sorted(countries_df["region"].dropna().unique().tolist()),
+                key="adv_map_view",
+            )
+        with map_control_col3:
+            map_color_schemes = [
+                "blues",
+                "teals",
+                "greens",
+                "oranges",
+                "reds",
+                "viridis",
+                "magma",
+                "inferno",
+                "plasma",
+                "turbo",
+            ]
+            st.selectbox(
+                "Heat map color range",
+                map_color_schemes,
+                key="adv_map_color_scheme",
+                format_func=lambda s: s.title(),
+            )
 
         # Build metric df
         map_rows = []
+        omitted_map_countries = []
         global_totals = {"screened": 0.0, "randomized": 0.0, "completed": 0.0}
         for r in res["countries"]:
             if r["result"]:
@@ -1160,6 +1526,7 @@ def render() -> None:
 
         for r in res["countries"]:
             if not r["result"]:
+                omitted_map_countries.append(r.get("country", "Unknown"))
                 continue
             out = r["result"]
             screened_total = max(out.states.screened.cumulative.values()) if out.states.screened.cumulative else 0.0
@@ -1172,14 +1539,22 @@ def render() -> None:
                 "screened_total": screened_total,
                 "randomized_total": randomized_total,
                 "completed_total": completed_total,
-                "sites": out.solve.solved_sites or 0,
+                "sites": out.primary.sites,
             })
 
         map_df = pd.DataFrame(map_rows)
         if view != "World":
             map_df = map_df[map_df["region"] == view]
+        map_df = map_df.copy()
 
         if not map_df.empty:
+            map_df = map_df.merge(
+                countries_df[["iso3", "m49_code"]].drop_duplicates(),
+                on="iso3",
+                how="left",
+            )
+            map_df["m49_id"] = pd.to_numeric(map_df["m49_code"], errors="coerce")
+
             if metric == "Randomized total":
                 map_df["metric"] = map_df["randomized_total"]
             elif metric == "Completed total":
@@ -1198,70 +1573,136 @@ def render() -> None:
                 denom = global_totals["screened"] or 1.0
                 map_df["metric"] = map_df["screened_total"] / denom * 100.0
 
-            col_map, col_pie = st.columns([2, 1])
-            with col_map:
-                fig = px.choropleth(
-                    map_df,
-                    locations="iso3",
-                    color="metric",
-                    hover_name="country",
-                    color_continuous_scale="YlOrRd",
+            world_topology = alt.topo_feature(
+                "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json",
+                "countries",
+            )
+            map_lookup_df = map_df.dropna(subset=["m49_id"]).copy()
+            map_lookup_df["m49_id"] = map_lookup_df["m49_id"].astype(int)
+
+            base_layer = (
+                alt.Chart(world_topology)
+                .mark_geoshape(fill="#F5F7FA", stroke="#DCE3EB", strokeWidth=0.6)
+                .project(type="equalEarth")
+            )
+
+            metric_format = ".1f"
+            if "%" in metric:
+                metric_format = ".2f"
+
+            if not map_lookup_df.empty:
+                lookup_rows = []
+                for _, row in map_lookup_df.iterrows():
+                    m49_id = row.get("m49_id")
+                    if pd.isna(m49_id):
+                        continue
+                    try:
+                        m49_int = int(m49_id)
+                    except Exception:
+                        continue
+                    base = {
+                        "country": row.get("country"),
+                        "region": row.get("region"),
+                        "metric": row.get("metric"),
+                    }
+                    lookup_rows.append({"lookup_id": str(m49_int), **base})
+                    lookup_rows.append({"lookup_id": f"{m49_int:03d}", **base})
+                map_lookup_norm_df = pd.DataFrame(lookup_rows)
+
+                choropleth_layer = (
+                    alt.Chart(world_topology)
+                    .mark_geoshape(stroke="#DCE3EB", strokeWidth=0.6)
+                    .transform_calculate(lookup_id="toString(datum.id)")
+                    .transform_lookup(
+                        lookup="lookup_id",
+                        from_=alt.LookupData(map_lookup_norm_df, "lookup_id", ["country", "region", "metric"]),
+                    )
+                    .transform_filter("isValid(datum.metric)")
+                    .encode(
+                        color=alt.Color(
+                            "metric:Q",
+                            title=metric,
+                            scale=alt.Scale(scheme=st.session_state["adv_map_color_scheme"]),
+                        ),
+                        tooltip=[
+                            alt.Tooltip("country:N", title="Country"),
+                            alt.Tooltip("region:N", title="Region"),
+                            alt.Tooltip("metric:Q", title=metric, format=metric_format),
+                        ],
+                    )
+                    .project(type="equalEarth")
                 )
-                if view != "World":
-                    fig.update_geos(fitbounds="locations", visible=False)
-                st.plotly_chart(fig, width="stretch")
+                st.altair_chart(
+                    alt.layer(base_layer, choropleth_layer).properties(height=520),
+                    width="stretch",
+                )
+            else:
+                st.altair_chart(base_layer.properties(height=520), width="stretch")
+                st.info("No matched country geometries available for selected map data.")
 
-            with col_pie:
-                st.checkbox("Show pie", key="adv_pie_enabled")
-                if st.session_state["adv_pie_enabled"]:
-                    pie_scope = st.selectbox("Pie scope", ["Region", "Country"], key="adv_pie_scope")
-                    st.selectbox("Metric family", ["Enrollment", "Sites"], key="adv_pie_metric_family")
-                    st.selectbox("State", ["Screened", "Randomized", "Completed"], key="adv_pie_state")
-                    st.selectbox("Label mode", ["Percent", "Value", "Both"], key="adv_pie_label_mode")
+            if omitted_map_countries:
+                omitted_list = ", ".join(sorted(dict.fromkeys(omitted_map_countries)))
+                st.warning(f"Omitted from map (no solved result): {omitted_list}")
 
-                    pie_df = map_df.copy()
-                    names_col = "country"
-                    if pie_scope == "Country":
-                        sel = st.selectbox("Country", pie_df["country"].tolist(), key="adv_pie_country")
-                        pie_df = pie_df[pie_df["country"] == sel]
-                    elif view == "World":
-                        pie_df = pie_df.groupby("region", as_index=False).sum(numeric_only=True)
-                        names_col = "region"
+            st.checkbox("Show pie", key="adv_pie_enabled")
+            if st.session_state["adv_pie_enabled"]:
+                st.markdown("### Pie View")
+                pie_scope = st.selectbox("Pie scope", ["Country", "Region"], key="adv_pie_scope")
+                st.selectbox("Metric family", ["Enrollment", "Sites"], key="adv_pie_metric_family")
+                st.selectbox("State", ["Screened", "Randomized", "Completed"], key="adv_pie_state")
+                st.selectbox("Label mode", ["Percent", "Value", "Both"], key="adv_pie_label_mode")
 
-                    if st.session_state["adv_pie_metric_family"] == "Sites":
-                        pie_df["pie_value"] = pie_df["sites"]
+                pie_df = map_df.copy()
+                names_col = "country"
+                if pie_scope == "Country":
+                    country_options_for_pie = sorted(pie_df["country"].dropna().unique().tolist())
+                    if not country_options_for_pie:
+                        pie_df = pie_df.iloc[0:0]
                     else:
-                        state = st.session_state["adv_pie_state"]
-                        if state == "Screened":
-                            pie_df["pie_value"] = pie_df["screened_total"]
-                        elif state == "Completed":
-                            pie_df["pie_value"] = pie_df["completed_total"]
-                        else:
-                            pie_df["pie_value"] = pie_df["randomized_total"]
-
-                    if not pie_df.empty:
-                        fig_pie = px.pie(
-                            pie_df,
-                            names=names_col,
-                            values="pie_value",
+                        selected_pie_country = st.selectbox(
+                            "Country",
+                            country_options_for_pie,
+                            key="adv_pie_country",
                         )
-                        if st.session_state["adv_pie_label_mode"] == "Percent":
-                            fig_pie.update_traces(
-                                texttemplate="%{percent:.0%}",
-                                hovertemplate="%{label}<br>%{percent:.0%}<extra></extra>",
-                            )
-                        elif st.session_state["adv_pie_label_mode"] == "Value":
-                            fig_pie.update_traces(
-                                texttemplate="%{value:.0f}",
-                                hovertemplate="%{label}<br>%{value:.0f}<extra></extra>",
-                            )
-                        else:
-                            fig_pie.update_traces(
-                                texttemplate="%{percent:.0%}<br>%{value:.0f}",
-                                hovertemplate="%{label}<br>%{percent:.0%}<br>%{value:.0f}<extra></extra>",
-                            )
+                        pie_df = pie_df[pie_df["country"] == selected_pie_country]
+                elif view == "World":
+                    pie_df = pie_df.groupby("region", as_index=False).sum(numeric_only=True)
+                    names_col = "region"
 
-                        st.plotly_chart(fig_pie, width="stretch")
+                if st.session_state["adv_pie_metric_family"] == "Sites":
+                    pie_df["pie_value"] = pie_df["sites"]
+                else:
+                    state = st.session_state["adv_pie_state"]
+                    if state == "Screened":
+                        pie_df["pie_value"] = pie_df["screened_total"]
+                    elif state == "Completed":
+                        pie_df["pie_value"] = pie_df["completed_total"]
+                    else:
+                        pie_df["pie_value"] = pie_df["randomized_total"]
+
+                if not pie_df.empty:
+                    fig_pie = px.pie(
+                        pie_df,
+                        names=names_col,
+                        values="pie_value",
+                    )
+                    if st.session_state["adv_pie_label_mode"] == "Percent":
+                        fig_pie.update_traces(
+                            texttemplate="%{percent:.0%}",
+                            hovertemplate="%{label}<br>%{percent:.0%}<extra></extra>",
+                        )
+                    elif st.session_state["adv_pie_label_mode"] == "Value":
+                        fig_pie.update_traces(
+                            texttemplate="%{value:.0f}",
+                            hovertemplate="%{label}<br>%{value:.0f}<extra></extra>",
+                        )
+                    else:
+                        fig_pie.update_traces(
+                            texttemplate="%{percent:.0%}<br>%{value:.0f}",
+                            hovertemplate="%{label}<br>%{percent:.0%}<br>%{value:.0f}<extra></extra>",
+                        )
+
+                    st.plotly_chart(fig_pie, width="stretch")
         else:
             st.info("No map data available (no successful countries).")
 
@@ -1282,3 +1723,29 @@ def render() -> None:
                     file_name="advanced_report.pdf",
                     mime="application/pdf",
                 )
+
+    with st.expander("Save / Load", expanded=False):
+        save_name = st.text_input("Save name", value="advanced_1", key="adv_save_name")
+        payload = dump_advanced_state(st.session_state)
+        payload["name"] = save_name
+
+        st.download_button(
+            "Download advanced scenario (.json)",
+            data=to_json_bytes(payload),
+            file_name=f"{save_name}.json",
+            mime="application/json",
+        )
+
+        uploaded = st.file_uploader(
+            "Load advanced scenario (.json)",
+            type=["json"],
+            key="adv_uploader",
+        )
+        if uploaded is not None:
+            try:
+                loaded = from_json_bytes(uploaded.read())
+                st.session_state["_adv_pending_load_payload"] = loaded
+                st.session_state["adv_uploader"] = None
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to load file: {e}")
