@@ -500,109 +500,110 @@ def render_scenario_inputs(scenario_key: str) -> ScenarioInputs:
         )
         sites = None
 
-    rr_label_map = {
-        "Screened": "screened",
-        "Randomized": "randomized",
-    }
-    rr_label = rr_label_map.get(period_type, "randomized")
-    st.markdown(
-        f"<p style='font-size:11pt;font-weight:700;margin:0.5rem 0;'># of subjects {rr_label}/site/month</p>",
-        unsafe_allow_html=True,
-    )
-    rr_columns = ["0% (FSFV)", "20%", "40%", "60%", "80%", "100%"]
-    rr_input_cols = ["#/site/month"] + rr_columns
-    rr_input_df = pd.DataFrame(
-        [["Rate"] + st.session_state[f"{scenario_key}_rr_pct"]],
-        columns=rr_input_cols,
-    )
-    rr_input_config = {
-        "#/site/month": st.column_config.TextColumn(disabled=True, width="small"),
-    }
-    for col in rr_columns:
-        rr_input_config[col] = st.column_config.NumberColumn(width="small")
-    rr_edit = st.data_editor(
-        rr_input_df,
-        num_rows="fixed",
-        hide_index=True,
-        width="stretch",
-        column_config=rr_input_config,
-        key=f"{scenario_key}_rr_editor",
-    )
-    rr_pct = [float(rr_edit.iloc[0][c]) for c in rr_columns]
-    st.session_state[f"{scenario_key}_rr_pct"] = rr_pct
-
-    if f"{scenario_key}_result" in st.session_state:
-        out = st.session_state[f"{scenario_key}_result"]
-        milestone_dates = _milestone_dates(out.primary.fsfv, out.primary.lsfv)
-        settings = GlobalSettings()
-        total_per_month = [out.primary.new_primary.get(d, 0.0) * settings.days_per_month for d in milestone_dates]
-        rr_out_df = pd.DataFrame(
-            [
-                ["Milestone Date"] + [_format_date(d) for d in milestone_dates],
-                [f"Total {rr_label.title()}/month"] + total_per_month,
-            ],
-            columns=rr_input_cols,
+    with st.expander("Site Activation and Enrollment Rate Ramp Tuning", expanded=True):
+        st.markdown(
+            "<p style='font-size:11pt;font-weight:700;margin:0.5rem 0;'>Site Activation Ramp: % sites active over time (FSFV to LSFV)</p>",
+            unsafe_allow_html=True,
         )
-        rr_out_df = _format_dataframe_numbers(rr_out_df)
-        rr_output_config = {"#/site/month": st.column_config.TextColumn(disabled=True, width="small")}
-        for col in rr_columns:
-            rr_output_config[col] = st.column_config.TextColumn(width="small")
-        st.caption("Calculated outputs at milestones")
-        st.dataframe(
-            rr_out_df,
-            width="stretch",
-            hide_index=True,
-            column_config=rr_output_config,
-        )
-
-    st.markdown(
-        "<p style='font-size:11pt;font-weight:700;margin:0.5rem 0;'>Site Activation Rate at % Milestones from FSFV to LSFV</p>",
-        unsafe_allow_html=True,
-    )
-    sar_columns = ["0% (FSFV)", "20%", "40%", "60%", "80%", "100%"]
-    sar_input_cols = ["Metric"] + sar_columns
-    sar_input_df = pd.DataFrame(
-        [["SAR%"] + st.session_state[f"{scenario_key}_sar_pct"]],
-        columns=sar_input_cols,
-    )
-    sar_input_config = {
-        "Metric": st.column_config.TextColumn(disabled=True, width="small"),
-    }
-    for col in sar_columns:
-        sar_input_config[col] = st.column_config.NumberColumn(width="small")
-    sar_edit = st.data_editor(
-        sar_input_df,
-        num_rows="fixed",
-        hide_index=True,
-        width="stretch",
-        column_config=sar_input_config,
-        key=f"{scenario_key}_sar_editor",
-    )
-    sar_pct = [float(sar_edit.iloc[0][c]) for c in sar_columns]
-    st.session_state[f"{scenario_key}_sar_pct"] = sar_pct
-
-    if f"{scenario_key}_result" in st.session_state:
-        out = st.session_state[f"{scenario_key}_result"]
-        milestone_dates = _milestone_dates(out.primary.fsfv, out.primary.lsfv)
-        active_sites = [out.primary.active_sites.get(d, 0.0) for d in milestone_dates]
-        sar_out_df = pd.DataFrame(
-            [
-                ["Milestone Date"] + [_format_date(d) for d in milestone_dates],
-                ["Active Sites"] + active_sites,
-            ],
+        sar_columns = ["0% (FSFV)", "20%", "40%", "60%", "80%", "100%"]
+        sar_input_cols = ["Metric"] + sar_columns
+        sar_input_df = pd.DataFrame(
+            [["SAR%"] + st.session_state[f"{scenario_key}_sar_pct"]],
             columns=sar_input_cols,
         )
-        sar_out_df = _format_dataframe_numbers(sar_out_df)
-        sar_output_config = {"Metric": st.column_config.TextColumn(disabled=True, width="small")}
+        sar_input_config = {
+            "Metric": st.column_config.TextColumn(disabled=True, width="small"),
+        }
         for col in sar_columns:
-            sar_output_config[col] = st.column_config.TextColumn(width="small")
-        st.caption("Calculated outputs at milestones")
-        st.dataframe(
-            sar_out_df,
-            width="stretch",
+            sar_input_config[col] = st.column_config.NumberColumn(width="small")
+        sar_edit = st.data_editor(
+            sar_input_df,
+            num_rows="fixed",
             hide_index=True,
-            column_config=sar_output_config,
+            width="stretch",
+            column_config=sar_input_config,
+            key=f"{scenario_key}_sar_editor",
         )
+        sar_pct = [float(sar_edit.iloc[0][c]) for c in sar_columns]
+        st.session_state[f"{scenario_key}_sar_pct"] = sar_pct
+
+        if f"{scenario_key}_result" in st.session_state:
+            out = st.session_state[f"{scenario_key}_result"]
+            milestone_dates = _milestone_dates(out.primary.fsfv, out.primary.lsfv)
+            active_sites = [out.primary.active_sites.get(d, 0.0) for d in milestone_dates]
+            sar_out_df = pd.DataFrame(
+                [
+                    ["Milestone Date"] + [_format_date(d) for d in milestone_dates],
+                    ["Active Sites"] + active_sites,
+                ],
+                columns=sar_input_cols,
+            )
+            sar_out_df = _format_dataframe_numbers(sar_out_df)
+            sar_output_config = {"Metric": st.column_config.TextColumn(disabled=True, width="small")}
+            for col in sar_columns:
+                sar_output_config[col] = st.column_config.TextColumn(width="small")
+            st.caption("Calculated outputs at milestones")
+            st.dataframe(
+                sar_out_df,
+                width="stretch",
+                hide_index=True,
+                column_config=sar_output_config,
+            )
+
+        rr_label_map = {
+            "Screened": "screened",
+            "Randomized": "randomized",
+        }
+        rr_label = rr_label_map.get(period_type, "randomized")
+        st.markdown(
+            f"<p style='font-size:11pt;font-weight:700;margin:0.5rem 0;'>Recruitment Ramp Tuning: # of subjects {rr_label}/site/month</p>",
+            unsafe_allow_html=True,
+        )
+        rr_columns = ["0% (FSFV)", "20%", "40%", "60%", "80%", "100%"]
+        rr_input_cols = ["#/site/month"] + rr_columns
+        rr_input_df = pd.DataFrame(
+            [["Rate"] + st.session_state[f"{scenario_key}_rr_pct"]],
+            columns=rr_input_cols,
+        )
+        rr_input_config = {
+            "#/site/month": st.column_config.TextColumn(disabled=True, width="small"),
+        }
+        for col in rr_columns:
+            rr_input_config[col] = st.column_config.NumberColumn(width="small")
+        rr_edit = st.data_editor(
+            rr_input_df,
+            num_rows="fixed",
+            hide_index=True,
+            width="stretch",
+            column_config=rr_input_config,
+            key=f"{scenario_key}_rr_editor",
+        )
+        rr_pct = [float(rr_edit.iloc[0][c]) for c in rr_columns]
+        st.session_state[f"{scenario_key}_rr_pct"] = rr_pct
+
+        if f"{scenario_key}_result" in st.session_state:
+            out = st.session_state[f"{scenario_key}_result"]
+            milestone_dates = _milestone_dates(out.primary.fsfv, out.primary.lsfv)
+            settings = GlobalSettings()
+            total_per_month = [out.primary.new_primary.get(d, 0.0) * settings.days_per_month for d in milestone_dates]
+            rr_out_df = pd.DataFrame(
+                [
+                    ["Milestone Date"] + [_format_date(d) for d in milestone_dates],
+                    [f"Total {rr_label.title()}/month"] + total_per_month,
+                ],
+                columns=rr_input_cols,
+            )
+            rr_out_df = _format_dataframe_numbers(rr_out_df)
+            rr_output_config = {"#/site/month": st.column_config.TextColumn(disabled=True, width="small")}
+            for col in rr_columns:
+                rr_output_config[col] = st.column_config.TextColumn(width="small")
+            st.caption("Calculated outputs at milestones")
+            st.dataframe(
+                rr_out_df,
+                width="stretch",
+                hide_index=True,
+                column_config=rr_output_config,
+            )
 
     st.markdown("<p style='font-size:11pt;font-weight:700;margin:0.5rem 0;'>Uncertainty bands</p>", unsafe_allow_html=True)
     ucol1, ucol2, ucol3 = st.columns([1, 1, 1])
@@ -684,6 +685,10 @@ def render_results(out, scenario_key: str):
         unsafe_allow_html=True,
     )
 
+    st.markdown(
+        "<hr style='border:0;border-top:1px solid rgba(128,128,128,0.45);margin:0.65rem 0 0.45rem 0;'>",
+        unsafe_allow_html=True,
+    )
     st.markdown("<p style='font-size:10pt;font-weight:700;'>Summary</p>", unsafe_allow_html=True)
 
     if u_enabled:
@@ -743,6 +748,10 @@ def render_results(out, scenario_key: str):
         df = _extend_cumulative_df_to_date(df, pessimistic_lslv)
 
     st.markdown(
+        "<hr style='border:0;border-top:1px solid rgba(128,128,128,0.45);margin:0.65rem 0 0.45rem 0;'>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
         "<p style='font-size:10pt;font-weight:700;margin:0.5rem 0;'>Cumulative recruitment over time</p>",
         unsafe_allow_html=True,
     )
@@ -752,10 +761,9 @@ def render_results(out, scenario_key: str):
     df_long["lower"] = (df_long["value"] * (1.0 - u_lower / 100.0)).clip(lower=0.0)
     df_long["upper"] = df_long["value"] * (1.0 + u_upper / 100.0)
 
-    toggle_col1, toggle_col2 = st.columns(2)
-    with toggle_col1:
+    chart_col, controls_col = st.columns([5, 1], gap="medium")
+    with controls_col:
         show_sites = st.checkbox("Show active sites by month", value=False, key=f"{scenario_key}_show_active_sites")
-    with toggle_col2:
         show_timeline_markers = st.checkbox(
             "Show timeline markers",
             value=True,
@@ -921,14 +929,15 @@ def render_results(out, scenario_key: str):
     if show_sites:
         chart = chart.resolve_scale(y="independent")
 
-    st.altair_chart(chart, width="stretch")
-    st.slider(
-        "X-axis date range",
-        min_value=domain_min,
-        max_value=domain_max,
-        value=(range_start, range_end),
-        key=chart_range_key,
-    )
+    with chart_col:
+        st.altair_chart(chart, width="stretch")
+        st.slider(
+            "X-axis date range",
+            min_value=domain_min,
+            max_value=domain_max,
+            value=(range_start, range_end),
+            key=chart_range_key,
+        )
 
     st.markdown(
         "<p style='font-size:10pt;font-weight:700;'>Bucket summary (Monthly, Randomized)</p>",
