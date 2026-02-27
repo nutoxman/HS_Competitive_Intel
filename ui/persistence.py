@@ -8,6 +8,26 @@ from typing import Any
 from engine.models.settings import GlobalSettings
 
 SCHEMA_VERSION = 1
+SIMPLE_SCENARIO_KEYS = [
+    "goal_type",
+    "goal_n",
+    "screen_fail_rate",
+    "discontinuation_rate",
+    "period_type",
+    "simple_scenario",
+    "driver",
+    "fsfv",
+    "lsfv",
+    "sites",
+    "lag_sr_days",
+    "lag_rc_days",
+    "sar_pct",
+    "rr_pct",
+    "include",
+    "uncertainty_enabled",
+    "uncertainty_lower_pct",
+    "uncertainty_upper_pct",
+]
 
 
 def _date_to_str(d: Any) -> Any:
@@ -51,27 +71,7 @@ def dump_session_state(settings: GlobalSettings, session_state: dict) -> dict:
     for i in range(1, 6):
         sk = f"S{i}"
         scenario = {}
-        keys = [
-            "goal_type",
-            "goal_n",
-            "screen_fail_rate",
-            "discontinuation_rate",
-            "period_type",
-            "simple_scenario",
-            "driver",
-            "fsfv",
-            "lsfv",
-            "sites",
-            "lag_sr_days",
-            "lag_rc_days",
-            "sar_pct",
-            "rr_pct",
-            "include",
-            "uncertainty_enabled",
-            "uncertainty_lower_pct",
-            "uncertainty_upper_pct",
-        ]
-        for k in keys:
+        for k in SIMPLE_SCENARIO_KEYS:
             ss_key = f"{sk}_{k}"
             if ss_key in session_state:
                 scenario[k] = _date_to_str(session_state[ss_key])
@@ -95,6 +95,31 @@ def load_into_session_state(payload: dict, session_state: dict) -> None:
 
         # clear results (re-run required)
         session_state.pop(f"{sk}_result", None)
+
+
+def dump_simple_scenario_state(session_state: dict, scenario_key: str) -> dict:
+    scenario: dict[str, Any] = {}
+    for key in SIMPLE_SCENARIO_KEYS:
+        ss_key = f"{scenario_key}_{key}"
+        if ss_key in session_state:
+            scenario[key] = _date_to_str(session_state[ss_key])
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "scenario": scenario,
+    }
+
+
+def load_simple_scenario_into_session_state(payload: dict, session_state: dict, scenario_key: str) -> None:
+    scenario = payload.get("scenario", {})
+    for key, value in scenario.items():
+        parsed = _str_to_date(value)
+        if key == "period_type" and parsed == "Completed":
+            parsed = "Randomized"
+        session_state[f"{scenario_key}_{key}"] = parsed
+
+    session_state.pop(f"{scenario_key}_sar_editor", None)
+    session_state.pop(f"{scenario_key}_rr_editor", None)
+    session_state.pop(f"{scenario_key}_result", None)
 
 
 def to_json_bytes(payload: dict) -> bytes:

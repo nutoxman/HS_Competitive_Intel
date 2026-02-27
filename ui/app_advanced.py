@@ -1763,10 +1763,76 @@ def render() -> None:
                 )
 
     with st.expander("Save / Load", expanded=False):
+        from ui.scenario_store import (
+            delete_saved_scenario,
+            list_saved_scenarios,
+            load_saved_scenario,
+            save_saved_scenario,
+        )
+
         save_name = st.text_input("Save name", value="advanced_1", key="adv_save_name")
         payload = dump_advanced_state(st.session_state)
         payload["name"] = save_name
 
+        st.markdown("### App Scenario Library")
+        saved_rows = list_saved_scenarios("advanced")
+        saved_names = [row["name"] for row in saved_rows]
+        if saved_names:
+            selected_key = "adv_saved_selection"
+            if st.session_state.get(selected_key) not in saved_names:
+                st.session_state[selected_key] = saved_names[0]
+            selected_saved = st.selectbox(
+                "Saved advanced scenarios",
+                options=saved_names,
+                key=selected_key,
+            )
+        else:
+            selected_saved = None
+            st.selectbox(
+                "Saved advanced scenarios",
+                options=["(none)"],
+                index=0,
+                disabled=True,
+                key="adv_saved_selection_empty",
+            )
+
+        lib_col1, lib_col2, lib_col3 = st.columns(3)
+        with lib_col1:
+            if st.button("Save to app library", key="adv_save_to_library", use_container_width=True):
+                try:
+                    save_saved_scenario(mode="advanced", name=save_name, payload=payload)
+                    st.success(f"Saved '{save_name.strip()}' to app library.")
+                except Exception as e:
+                    st.error(f"Failed to save scenario: {e}")
+        with lib_col2:
+            if st.button(
+                "Load selected",
+                key="adv_load_from_library",
+                disabled=selected_saved is None,
+                use_container_width=True,
+            ):
+                try:
+                    loaded = load_saved_scenario("advanced", selected_saved)
+                    st.session_state["_adv_pending_load_payload"] = loaded
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to load saved scenario: {e}")
+        with lib_col3:
+            if st.button(
+                "Delete selected",
+                key="adv_delete_from_library",
+                disabled=selected_saved is None,
+                use_container_width=True,
+            ):
+                try:
+                    if selected_saved and delete_saved_scenario("advanced", selected_saved):
+                        st.success(f"Deleted '{selected_saved}'.")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to delete saved scenario: {e}")
+
+        st.caption(f"{len(saved_names)} saved advanced scenario(s) in app library.")
+        st.markdown("### Import / Export (.json)")
         st.download_button(
             "Download advanced scenario (.json)",
             data=to_json_bytes(payload),
