@@ -344,7 +344,7 @@ def _init_defaults() -> None:
         "adv_map_view": "World",
         "adv_map_color_scheme": "blues",
         "adv_pie_enabled": False,
-        "adv_pie_scope": "Country",
+        "adv_pie_scope": "Global",
         "adv_pie_metric_family": "Enrollment",
         "adv_pie_state": "Randomized",
         "adv_pie_label_mode": "Both",
@@ -357,6 +357,10 @@ def _init_defaults() -> None:
 
     if st.session_state.get("adv_period_type") not in {"Screened", "Randomized"}:
         st.session_state["adv_period_type"] = "Screened"
+    if st.session_state.get("adv_pie_scope") not in {"Global", "Region"}:
+        st.session_state["adv_pie_scope"] = "Global"
+    if st.session_state.get("adv_pie_label_mode") not in {"Percent", "Value", "Both"}:
+        st.session_state["adv_pie_label_mode"] = "Both"
 
     st.session_state["adv_initialized"] = True
 
@@ -1542,7 +1546,8 @@ def render() -> None:
                 "sites": out.primary.sites,
             })
 
-        map_df = pd.DataFrame(map_rows)
+        map_df_all = pd.DataFrame(map_rows).copy()
+        map_df = map_df_all.copy()
         if view != "World":
             map_df = map_df[map_df["region"] == view]
         map_df = map_df.copy()
@@ -1647,25 +1652,14 @@ def render() -> None:
             st.checkbox("Show pie", key="adv_pie_enabled")
             if st.session_state["adv_pie_enabled"]:
                 st.markdown("### Pie View")
-                pie_scope = st.selectbox("Pie scope", ["Country", "Region"], key="adv_pie_scope")
+                pie_scope = st.selectbox("Pie scope", ["Global", "Region"], key="adv_pie_scope")
                 st.selectbox("Metric family", ["Enrollment", "Sites"], key="adv_pie_metric_family")
                 st.selectbox("State", ["Screened", "Randomized", "Completed"], key="adv_pie_state")
                 st.selectbox("Label mode", ["Percent", "Value", "Both"], key="adv_pie_label_mode")
 
-                pie_df = map_df.copy()
+                pie_df = map_df_all.copy() if pie_scope == "Global" else map_df.copy()
                 names_col = "country"
-                if pie_scope == "Country":
-                    country_options_for_pie = sorted(pie_df["country"].dropna().unique().tolist())
-                    if not country_options_for_pie:
-                        pie_df = pie_df.iloc[0:0]
-                    else:
-                        selected_pie_country = st.selectbox(
-                            "Country",
-                            country_options_for_pie,
-                            key="adv_pie_country",
-                        )
-                        pie_df = pie_df[pie_df["country"] == selected_pie_country]
-                elif view == "World":
+                if pie_scope == "Region":
                     pie_df = pie_df.groupby("region", as_index=False).sum(numeric_only=True)
                     names_col = "region"
 
@@ -1701,6 +1695,11 @@ def render() -> None:
                             texttemplate="%{percent:.0%}<br>%{value:.0f}",
                             hovertemplate="%{label}<br>%{percent:.0%}<br>%{value:.0f}<extra></extra>",
                         )
+                    fig_pie.update_traces(textfont=dict(size=12))
+                    fig_pie.update_layout(
+                        font=dict(size=12),
+                        legend=dict(font=dict(size=12)),
+                    )
 
                     st.plotly_chart(fig_pie, width="stretch")
         else:
