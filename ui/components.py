@@ -24,6 +24,87 @@ SUBJECTS_LEGEND_TITLE = "# of Subjects"
 ACTIVE_SITES_BAR_WIDTH_PX = 11.25
 AXIS_TICK_SIZE_PX = 5
 TIMELINE_MARKER_COLOR = "#FFEA00"
+CHART_COLOR_PALETTES: dict[str, dict[str, str]] = {
+    "Default": {
+        "color_screened": "#1F77B4",
+        "color_randomized": "#FF7F0E",
+        "color_completed": "#2CA02C",
+        "color_active_sites": "#7F7F7F",
+    },
+    "Colorblind-safe": {
+        "color_screened": "#0072B2",
+        "color_randomized": "#E69F00",
+        "color_completed": "#009E73",
+        "color_active_sites": "#666666",
+    },
+    "High contrast": {
+        "color_screened": "#00C2FF",
+        "color_randomized": "#FF4D00",
+        "color_completed": "#00E676",
+        "color_active_sites": "#FFFFFF",
+    },
+    "Cool": {
+        "color_screened": "#2E86AB",
+        "color_randomized": "#5FA8D3",
+        "color_completed": "#3FC1C9",
+        "color_active_sites": "#8D99AE",
+    },
+    "Warm": {
+        "color_screened": "#D1495B",
+        "color_randomized": "#EDA72A",
+        "color_completed": "#66A182",
+        "color_active_sites": "#8C5E58",
+    },
+}
+
+
+def _default_chart_style() -> dict[str, object]:
+    return {
+        "palette_name": "High contrast",
+        "show_custom_title": False,
+        "custom_title": "Cumulative recruitment over time",
+        "legend_title": SUBJECTS_LEGEND_TITLE,
+        "legend_position": "Right",
+        "font_family": "sans-serif",
+        "font_size": 10,
+        "line_width": 2.0,
+        "uncertainty_opacity": 0.18,
+        "active_sites_opacity": 0.25,
+        "active_sites_bar_width": ACTIVE_SITES_BAR_WIDTH_PX,
+        "color_screened": "#00C2FF",
+        "color_randomized": "#FF4D00",
+        "color_completed": "#00E676",
+        "color_active_sites": "#FFFFFF",
+    }
+
+
+def _chart_style_keys(scenario_key: str) -> dict[str, str]:
+    return {
+        "palette_name": f"{scenario_key}_chart_palette_name",
+        "show_custom_title": f"{scenario_key}_chart_show_custom_title",
+        "custom_title": f"{scenario_key}_chart_custom_title",
+        "legend_title": f"{scenario_key}_chart_legend_title",
+        "legend_position": f"{scenario_key}_chart_legend_position",
+        "font_family": f"{scenario_key}_chart_font_family",
+        "font_size": f"{scenario_key}_chart_font_size",
+        "line_width": f"{scenario_key}_chart_line_width",
+        "uncertainty_opacity": f"{scenario_key}_chart_uncertainty_opacity",
+        "active_sites_opacity": f"{scenario_key}_chart_active_sites_opacity",
+        "active_sites_bar_width": f"{scenario_key}_chart_active_sites_bar_width",
+        "color_screened": f"{scenario_key}_chart_color_screened",
+        "color_randomized": f"{scenario_key}_chart_color_randomized",
+        "color_completed": f"{scenario_key}_chart_color_completed",
+        "color_active_sites": f"{scenario_key}_chart_color_active_sites",
+    }
+
+
+def _apply_palette_to_state(style_keys: dict[str, str], palette_name: str) -> None:
+    palette = CHART_COLOR_PALETTES.get(palette_name)
+    if not palette:
+        return
+    for color_field, color_value in palette.items():
+        if color_field in style_keys:
+            st.session_state[style_keys[color_field]] = color_value
 
 
 def _format_number(value):
@@ -761,6 +842,15 @@ def render_results(out, scenario_key: str):
     df_long["lower"] = (df_long["value"] * (1.0 - u_lower / 100.0)).clip(lower=0.0)
     df_long["upper"] = df_long["value"] * (1.0 + u_upper / 100.0)
 
+    style_defaults = _default_chart_style()
+    style_keys = _chart_style_keys(scenario_key)
+    for field_name, widget_key in style_keys.items():
+        st.session_state.setdefault(widget_key, style_defaults[field_name])
+    if st.session_state.get(style_keys["palette_name"]) not in CHART_COLOR_PALETTES:
+        st.session_state[style_keys["palette_name"]] = style_defaults["palette_name"]
+    editor_open_key = f"{scenario_key}_chart_editor_open"
+    st.session_state.setdefault(editor_open_key, False)
+
     chart_col, controls_col = st.columns([5, 1], gap="medium")
     with controls_col:
         show_sites = st.checkbox("Show active sites by month", value=False, key=f"{scenario_key}_show_active_sites")
@@ -769,6 +859,20 @@ def render_results(out, scenario_key: str):
             value=True,
             key=f"{scenario_key}_show_timeline_markers",
         )
+
+    legend_orient_map = {
+        "Right": "right",
+        "Left": "left",
+        "Top": "top",
+        "Bottom": "bottom",
+    }
+    legend_orient = legend_orient_map.get(st.session_state[style_keys["legend_position"]], "right")
+    state_color_range = [
+        st.session_state[style_keys["color_screened"]],
+        st.session_state[style_keys["color_randomized"]],
+        st.session_state[style_keys["color_completed"]],
+    ]
+
     show_sites_prev_key = f"{scenario_key}_show_active_sites_prev"
     show_sites_prev = bool(st.session_state.get(show_sites_prev_key, False))
 
@@ -814,8 +918,9 @@ def render_results(out, scenario_key: str):
         ),
         color=alt.Color(
             "state:N",
-            title=SUBJECTS_LEGEND_TITLE,
-            scale=alt.Scale(domain=STATE_SERIES_ORDER),
+            title=str(st.session_state[style_keys["legend_title"]]),
+            scale=alt.Scale(domain=STATE_SERIES_ORDER, range=state_color_range),
+            legend=alt.Legend(orient=legend_orient),
         ),
     )
 
@@ -829,7 +934,7 @@ def render_results(out, scenario_key: str):
     )
     if u_enabled:
         layers.append(
-            base.mark_area(opacity=0.18).encode(
+            base.mark_area(opacity=float(st.session_state[style_keys["uncertainty_opacity"]])).encode(
                 y=alt.Y(
                     "lower:Q",
                     axis=None if show_sites else cumulative_axis,
@@ -839,7 +944,7 @@ def render_results(out, scenario_key: str):
         )
 
     layers.append(
-        base.mark_line().encode(
+        base.mark_line(strokeWidth=float(st.session_state[style_keys["line_width"]])).encode(
             y=alt.Y(
                 "value:Q",
                 axis=cumulative_axis,
@@ -855,7 +960,11 @@ def render_results(out, scenario_key: str):
     if monthly is not None and not monthly.empty:
         bar = (
             alt.Chart(monthly)
-            .mark_bar(opacity=0.25, size=ACTIVE_SITES_BAR_WIDTH_PX)
+            .mark_bar(
+                opacity=float(st.session_state[style_keys["active_sites_opacity"]]),
+                size=float(st.session_state[style_keys["active_sites_bar_width"]]),
+                color=str(st.session_state[style_keys["color_active_sites"]]),
+            )
             .encode(
                 x=alt.X(
                     "date:T",
@@ -912,8 +1021,9 @@ def render_results(out, scenario_key: str):
                 baseline="top",
                 dx=4,
                 dy=4,
-                fontSize=10,
+                fontSize=max(8, int(st.session_state[style_keys["font_size"]]) - 1),
                 fontWeight="bold",
+                font=str(st.session_state[style_keys["font_family"]]),
             )
             .encode(
                 x=alt.X(
@@ -926,6 +1036,26 @@ def render_results(out, scenario_key: str):
         )
 
     chart = alt.layer(*layers).properties(height=320)
+    if bool(st.session_state[style_keys["show_custom_title"]]):
+        chart = chart.properties(title=str(st.session_state[style_keys["custom_title"]]))
+    chart = (
+        chart.configure_axis(
+            labelFontSize=int(st.session_state[style_keys["font_size"]]),
+            titleFontSize=int(st.session_state[style_keys["font_size"]]),
+            labelFont=str(st.session_state[style_keys["font_family"]]),
+            titleFont=str(st.session_state[style_keys["font_family"]]),
+        )
+        .configure_legend(
+            labelFontSize=int(st.session_state[style_keys["font_size"]]),
+            titleFontSize=int(st.session_state[style_keys["font_size"]]),
+            labelFont=str(st.session_state[style_keys["font_family"]]),
+            titleFont=str(st.session_state[style_keys["font_family"]]),
+        )
+        .configure_title(
+            fontSize=int(st.session_state[style_keys["font_size"]]) + 1,
+            font=str(st.session_state[style_keys["font_family"]]),
+        )
+    )
     if show_sites:
         chart = chart.resolve_scale(y="independent")
 
@@ -938,6 +1068,60 @@ def render_results(out, scenario_key: str):
             value=(range_start, range_end),
             key=chart_range_key,
         )
+        if st.button("Edit chart", key=f"{scenario_key}_chart_editor_toggle", use_container_width=False):
+            st.session_state[editor_open_key] = not bool(st.session_state.get(editor_open_key, False))
+
+        if st.session_state.get(editor_open_key, False):
+            with st.container(border=True):
+                col1, col2, col3, col4 = st.columns(4, gap="small")
+                with col1:
+                    if st.button("Reset chart style", key=f"{scenario_key}_chart_editor_reset", use_container_width=True):
+                        for field_name, widget_key in style_keys.items():
+                            st.session_state[widget_key] = style_defaults[field_name]
+                        _apply_palette_to_state(style_keys, str(style_defaults["palette_name"]))
+                        st.rerun()
+                    st.selectbox("Palette", list(CHART_COLOR_PALETTES.keys()), key=style_keys["palette_name"])
+                    if st.button("Apply palette", key=f"{scenario_key}_chart_apply_palette", use_container_width=True):
+                        _apply_palette_to_state(style_keys, str(st.session_state[style_keys["palette_name"]]))
+                        st.rerun()
+                    st.selectbox("Font family", ["sans-serif", "serif", "monospace"], key=style_keys["font_family"])
+                    st.number_input("Font size", min_value=8, max_value=20, step=1, key=style_keys["font_size"])
+
+                with col2:
+                    st.checkbox("Show custom title", key=style_keys["show_custom_title"])
+                    st.text_input("Custom title", key=style_keys["custom_title"])
+                    st.text_input("Legend title", key=style_keys["legend_title"])
+                    st.selectbox("Legend position", ["Right", "Left", "Top", "Bottom"], key=style_keys["legend_position"])
+
+                with col3:
+                    st.slider("Line width", min_value=1.0, max_value=6.0, step=0.5, key=style_keys["line_width"])
+                    st.slider(
+                        "Uncertainty opacity",
+                        min_value=0.05,
+                        max_value=0.50,
+                        step=0.01,
+                        key=style_keys["uncertainty_opacity"],
+                    )
+                    st.slider(
+                        "Active sites opacity",
+                        min_value=0.05,
+                        max_value=0.80,
+                        step=0.01,
+                        key=style_keys["active_sites_opacity"],
+                    )
+                    st.slider(
+                        "Active sites bar width",
+                        min_value=6.0,
+                        max_value=30.0,
+                        step=1.0,
+                        key=style_keys["active_sites_bar_width"],
+                    )
+
+                with col4:
+                    st.color_picker("Screened color", key=style_keys["color_screened"])
+                    st.color_picker("Randomized color", key=style_keys["color_randomized"])
+                    st.color_picker("Completed color", key=style_keys["color_completed"])
+                    st.color_picker("Active sites color", key=style_keys["color_active_sites"])
 
     st.markdown(
         "<p style='font-size:10pt;font-weight:700;'>Bucket summary (Monthly, Randomized)</p>",

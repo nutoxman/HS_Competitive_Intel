@@ -27,6 +27,21 @@ SIMPLE_SCENARIO_KEYS = [
     "uncertainty_enabled",
     "uncertainty_lower_pct",
     "uncertainty_upper_pct",
+    "chart_palette_name",
+    "chart_show_custom_title",
+    "chart_custom_title",
+    "chart_legend_title",
+    "chart_legend_position",
+    "chart_font_family",
+    "chart_font_size",
+    "chart_line_width",
+    "chart_uncertainty_opacity",
+    "chart_active_sites_opacity",
+    "chart_active_sites_bar_width",
+    "chart_color_screened",
+    "chart_color_randomized",
+    "chart_color_completed",
+    "chart_color_active_sites",
 ]
 
 
