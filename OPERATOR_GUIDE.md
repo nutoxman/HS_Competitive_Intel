@@ -1,8 +1,8 @@
 # Recruitment Scenario Planner - Operator Guide
 
-This guide covers day-to-day operation of the Streamlit app.
+This guide describes day-to-day operation of the app.
 
-## 1) Quick start
+## 1) Launch and Verification
 
 From `/Users/stevensweeney/Desktop/Codex`:
 
@@ -10,162 +10,147 @@ From `/Users/stevensweeney/Desktop/Codex`:
 make run
 ```
 
-Run tests:
+Optional test pass:
 
 ```bash
 make test
 ```
 
-## 2) Global UI behavior
+When app is running, verify:
 
-- Sidebar mode selector label is `Select one`.
-- App UI baseline font is set to 10pt.
-- Table cells are centered globally for both text and numeric values.
-- Displayed dates use `dd-mmm-yyyy` across charts, tables, timelines, and PDF output.
-- Date input widgets use `dd-mm-yyyy` (Streamlit input-format limitation).
+- Sidebar title: `Mode`
+- Mode selector label: `Select one`
+- Available modes:
+  - `Simple Scenario: # of Sites Drives Timeline`
+  - `Simple Scenario: Timeline Drives # of Sites`
+  - `Advanced`
 
-## 3) Modes
+## 2) Global Behavior
 
-Sidebar options:
+- App baseline typography is tuned to 10pt.
+- Displayed dates use `dd-mmm-yyyy` in charts/tables.
+- Date input widgets use `dd-mm-yyyy`.
+- Switching between Simple and Advanced preserves mode-specific state.
 
-- `Simple Scenario: Simple Scenario: # of Sites Drives Timeline`
-- `Simple Scenario: Timeline Drives # of Sites`
-- `Advanced`
+## 3) Simple Mode Operations
 
-## 4) Simple mode
+### 3.1 Scenario Setup and Run
 
-### 4.1 Page title and defaults
+1. Choose one of the two Simple modes in sidebar.
+2. Open scenario tab `S1`-`S5`.
+3. Enter scenario inputs.
+4. Expand `Site Activation and Enrollment Rate Ramp Tuning` if needed.
+5. Click `Run Sx`.
 
-Page title changes by selected simple mode and is rendered at 12pt:
+Notes:
 
-- `Simple Mode: # of Sites Drives Timeline`
-- `Simple Mode: Timeline Drives # of Sites`
+- `Recruitment Rate type (primary)` supports `Screened` and `Randomized`.
+- Copy controls are available when prior scenario results exist.
 
-Per-scenario defaults on first initialization:
+### 3.2 Review Results
 
-- `FSFV = today`
-- `LSFV = today + 1 year`
-- `Sites = 10`
-- `Lag Screened -> Randomized = 14`
-- `Lag Randomized -> Completed = 60`
+After run, review in order:
 
-### 4.2 Inputs
+1. `Summary`
+2. `Cumulative recruitment over time`
+3. Bucket and milestone tables
 
-- `Goal Type` is renamed to `Solve For`.
-- Values display as `Total Randomized` and `Total Completed`.
-- `Recruitment period type (primary)` is renamed to `Recruitment Rate type (primary)`.
-- Primary-period options are restricted to `Screened` and `Randomized`.
+Chart controls:
 
-### 4.3 RR and SAR tables
+- `Show active sites by month`
+- `Show timeline markers`
+- `X-axis date range`
 
-RR table behavior:
+### 3.3 Use Edit Chart
 
-- RR table is shown first after the input fields.
-- Label remains dynamic by selected primary period (screened/randomized wording).
-- First column title is `#/site/month`.
-- Row label `RR` is changed to `Rate`.
-- Milestone header `0%` is changed to `0% (FSFV)`.
+Below the `X-axis date range` slider, click `Edit chart`.
 
-SAR table behavior:
+The control panel is arranged in 4 columns:
 
-- Milestone header `0%` is changed to `0% (FSFV)`.
+1. Reset / palette / font controls
+2. Title + legend text/position controls
+3. Line and opacity/bar-width controls
+4. Manual color selectors
 
-Calculated milestone output tables for RR and SAR also use `0% (FSFV)`.
+Default behavior:
 
-### 4.4 Copy controls
+- Default palette is `High contrast`.
+- `Reset chart style` restores defaults (including `High contrast`).
 
-- `Copy inputs from:` uses a fixed-width dropdown (~1 inch / 96px).
-- Copy controls are hidden until at least one scenario has been run.
-- Once visible, copy behavior remains per scenario tab (source -> current tab).
+### 3.4 Comparison View
 
-### 4.5 Chart date range controls
+Open `Comparison` tab.
 
-Simple mode includes user-editable date windows:
+- Choose state to compare (`Screened`, `Randomized`, `Completed`).
+- Included scenarios are controlled by each scenario's `Include in comparison` checkbox.
 
-- Scenario cumulative chart: `Display date range`
-- Comparison chart: `Display date range`
+Save/load:
 
-Comparison default x-axis range:
+- Section: `Save / Load Comparison`
+- Workflow: JSON import/export (`Download saved comparison (.json)` / `Load saved comparison (.json)`)
 
-- Start = earliest available date in merged included scenarios.
-- End = latest solved completion timeline across included scenarios + 30 days.
+## 4) Advanced Mode Operations
 
-### 4.6 Save/load (Simple)
+### 4.1 Configure and Run
 
-In `Comparison` tab:
+1. Select `Advanced` mode.
+2. Set `Recruitment Rate type (primary)` first.
+3. Select countries (up to 20).
+4. Edit `Country Configuration` table:
+   - FSFV, Sites, Target, SAR milestones, RR milestones
+5. Optional: configure `Global Inputs` and uncertainty.
+6. Click `Run Advanced Scenario`.
 
-- Download: saved comparison JSON.
-- Load: restores scenario state.
-- Loaded scenarios clear prior results and require rerun.
+### 4.2 Review Advanced Outputs
 
-Legacy compatibility:
+Primary sections:
 
-- If loaded data has primary period `Completed`, it auto-converts to `Randomized`.
+1. `Run Inputs Used`
+2. `Country Summary`
+3. `Global Roll-up`
+4. `Global + Country Cumulative Curves`
+5. `Site Activation Over Time`
+6. `Country Drill-down` (collapsible)
+7. `Pie View` (collapsible)
+8. `Map View` (collapsible)
 
-## 5) Advanced mode
+Chart controls:
 
-### 5.1 Defaults and global inputs
+- Date range sliders are available on global, site activation, and drill-down charts.
+- Chart Options panel controls global and country line colors.
 
-Advanced defaults on first initialization:
+### 4.3 Save/Load and Export
 
-- `Default FSFV = today`
-- `Default LSFV = today + 1 year`
-- `Default Sites = 10`
-- `Lag Screened -> Randomized = 14`
-- `Lag Randomized -> Completed = 60`
+- Save/load section: `Save / Load` expander
+- Workflow: JSON import/export only
+- PDF output: `Export PDF` expander
 
-Input labels and options:
+## 5) Data and Persistence Behavior
 
-- `Goal Type` -> `Solve For`
-- Value display: `Total Randomized` / `Total Completed`
-- `Recruitment period type (primary)` -> `Recruitment Rate type (primary)`
-- Primary-period options: `Screened`, `Randomized`
+Current operator-facing persistence is JSON import/export.
 
-### 5.2 Country configuration
+- Loading a JSON scenario resets prior solved results and requires rerun.
+- Compatibility normalization is applied for legacy values where needed.
 
-- Country table date editors use `dd-mm-yyyy` entry format.
-- Derived global FSFV informational message uses `dd-mmm-yyyy` display.
+## 6) Common Validation Rules
 
-### 5.3 Chart date range controls
+Expect validation errors when:
 
-Advanced mode includes user-editable date windows:
+- Required country fields are blank
+- Sites/targets are non-integer or non-positive
+- SAR values are outside `[0, 100]`
+- RR values are negative
 
-- Global + country cumulative curves: `Display date range`
-- Site activation chart: `Display site activation date range`
-- Country drill-down chart: `Display country date range`
+Resolution workflow:
 
-### 5.4 Save/load and compatibility
+1. Correct highlighted inputs.
+2. Re-run scenario.
 
-- Save/load advanced scenario JSON via `Save / Load` section.
-- Loading clears prior advanced results.
-- Legacy loaded `adv_period_type=Completed` auto-converts to `Randomized`.
-
-### 5.5 Export
-
-- PDF export preserves `dd-mmm-yyyy` date display.
-
-## 6) Guardrails and common errors
-
-- Screen-fail and discontinuation rates must be in `[0,1)`.
-- `LSFV` must be after `FSFV`.
-- SAR must have 6 values in `0-100`.
-- RR must have 6 numeric values `>= 0`.
-- Solver guardrails apply (`max_sites`, `max_duration_days`).
-
-If target is unreachable, adjust one or more:
-
-- Increase sites.
-- Extend timeline.
-- Increase SAR/RR assumptions.
-- Lower target.
-- Reduce lag/failure/discontinuation assumptions.
-
-## 7) Key files
+## 7) Key Files
 
 - App entry: `/Users/stevensweeney/Desktop/Codex/ui/app.py`
-- Simple mode orchestration: `/Users/stevensweeney/Desktop/Codex/ui/app_simple.py`
-- Shared simple components: `/Users/stevensweeney/Desktop/Codex/ui/components.py`
-- Advanced mode: `/Users/stevensweeney/Desktop/Codex/ui/app_advanced.py`
-- Persistence and load compatibility: `/Users/stevensweeney/Desktop/Codex/ui/persistence.py`
-- Advanced PDF export: `/Users/stevensweeney/Desktop/Codex/export/advanced_pdf.py`
-- Engine orchestration: `/Users/stevensweeney/Desktop/Codex/engine/core/run_simple.py`
+- Simple mode page: `/Users/stevensweeney/Desktop/Codex/ui/app_simple.py`
+- Shared simple components/charts: `/Users/stevensweeney/Desktop/Codex/ui/components.py`
+- Advanced mode page: `/Users/stevensweeney/Desktop/Codex/ui/app_advanced.py`
+- Save/load serialization: `/Users/stevensweeney/Desktop/Codex/ui/persistence.py`
+- PDF export: `/Users/stevensweeney/Desktop/Codex/export/advanced_pdf.py`

@@ -1,20 +1,24 @@
 # Recruitment Scenario Planner
 
-Streamlit application for recruitment scenario planning with:
-
-- Simple mode (up to 5 scenarios + comparison)
-- Advanced mode (multi-country allocation and roll-up)
-- Solver-backed timeline/site calculations
-- Uncertainty bands, map/pie analytics, and PDF export
+Streamlit application for recruitment planning with scenario simulation, timeline solving, uncertainty visualization, and country-level advanced modeling.
 
 ## Repository
 
 GitHub: [nutoxman/RecruitmentScenarioPlannerV2](https://github.com/nutoxman/RecruitmentScenarioPlannerV2)
 
+## Core Capabilities
+
+- `Simple` mode with five scenario tabs (`S1`-`S5`) plus a comparison view
+- `Advanced` mode with multi-country configuration and global roll-up
+- Solver-backed calculations for timeline and/or site requirements
+- Uncertainty bands and optimistic/pessimistic timeline outputs
+- Interactive charts (date-range control, timeline markers, chart styling editor)
+- Advanced outputs: country summary, global roll-up, drill-down, pie/map views, and PDF export
+
 ## Requirements
 
-- Python 3.14 (as used in this workspace)
-- Virtual environment with dependencies from `requirements.txt`
+- Python `3.12+` (local workspace currently uses `3.14`)
+- Dependencies in `requirements.txt`
 
 ## Install
 
@@ -31,7 +35,7 @@ pip install -r requirements-dev.txt
 make run
 ```
 
-Equivalent command:
+Equivalent:
 
 ```bash
 .venv/bin/streamlit run ui/app.py
@@ -43,78 +47,88 @@ Equivalent command:
 make test
 ```
 
-Equivalent command:
+Equivalent:
 
 ```bash
 .venv/bin/pytest
 ```
 
-## Latest Enhancements
-
-- Canonical simple mode label is now `Simple Scenario: # of Sites Drives Timeline` (legacy saved label still loads).
-- Simple mode inputs persist when switching to `Advanced` and back.
-- The two simple drivers are isolated from each other (independent values per mode).
-- Scenario input headers are dynamic by selected driver: `Scenario Sx Inputs: # of Sites Drives Timeline` and `Scenario Sx Inputs: Timeline Drives # of Sites`.
-- Input layout in simple mode is now mode-specific with a 4-column arrangement.
-- `Recruitment Rate type (primary)` defaults to `Screened` for new simple scenarios.
-- RR and SAR input table text color is `#09CFEA`.
-- Summary typography is standardized to 10pt, and `Avg Randomized/site/month` plus `Avg Screened/site/month` are shown with solved outputs.
-- Uncertainty labels now read `Pessimistic: Lower % (below)` and `Optimistic: Upper % (above)`.
-- Summary can show `Optimistic Timelines` and `Pessimistic Timelines` alongside base `Timelines`.
-- Cumulative series extends to pessimistic `LSLV` when uncertainty is enabled.
-- Scenario chart control is now `X-axis date range` (slider below the chart).
-- Optional `Show timeline markers` toggle is available below `Show active sites by month`.
-- Timeline markers include `FSFV`, `FSLV`, `LSFV`, and `LSLV` as bright yellow dotted vertical lines.
-- Legend order is fixed to `Screened`, `Randomized`, `Completed` with title `# of Subjects`.
-- Axes show tick marks and vertical grid lines.
-- Active-sites overlay bars were widened.
-- Comparison chart x-axis defaults extend one month past latest solved completion date and support the same `X-axis date range` slider.
-
 ## Modes
 
-### Simple mode
+### Simple Mode
 
-- Drivers: `Simple Scenario: # of Sites Drives Timeline` (fixed sites, solve for LSFV) and `Simple Scenario: Timeline Drives # of Sites` (fixed timeline, solve for sites)
-- Five scenario tabs (`S1-S5`) plus comparison tab
-- Scenario copy controls in a single row (dropdown + button)
-- Save/load JSON in comparison tab
-- Uncertainty bands and timeline projections
-- X-axis date range sliders for scenario and comparison charts
+Sidebar options:
 
-### Advanced mode
+- `Simple Scenario: # of Sites Drives Timeline`
+- `Simple Scenario: Timeline Drives # of Sites`
 
-- Single global scenario split across up to 20 countries
-- Weight-based integer goal allocation
-- Country-level runs + global aggregation
-- Uncertainty support on country/global curves
-- Map and pie analytics, country drill-down
-- X-axis date range sliders on global/site/country charts
-- Save/load JSON and PDF export
+Key behavior:
 
-## Current UI Behavior Highlights
+- Inputs persist when switching between app modes
+- The two simple scenario drivers are isolated and retain independent values
+- Scenario header is dynamic to selected simple driver
+- `Recruitment Rate type (primary)` options: `Screened`, `Randomized`
+- `Ramp Tuning` section is collapsible and includes:
+  - `Site Activation Ramp: % sites active over time (FSFV to LSFV)`
+  - `Recruitment Ramp Tuning: # of subjects <screened|randomized>/site/month`
+- Cumulative chart controls:
+  - `Show active sites by month`
+  - `Show timeline markers` (FSFV/FSLV/LSFV/LSLV)
+  - `X-axis date range` slider
+  - `Edit chart` panel (palette, title, legend, font, line/bar style, colors)
+- Comparison tab supports JSON import/export save/load
 
-- Sidebar mode selector title: `Mode`
-- Sidebar mode selector label: `Select one`
-- App baseline font: 10pt
-- Display date format: `dd-mmm-yyyy`
-- Date input widget format: `dd-mm-yyyy` (Streamlit limitation)
-- `Solve For` replaces `Goal Type`
-- `Recruitment Rate type (primary)` replaces recruitment-period naming
-- Primary-rate options are `Screened` and `Randomized`
+### Advanced Mode
 
-## Save/Load Compatibility
+Key behavior:
 
-- Legacy simple mode label values are normalized automatically on load.
-- Legacy `Completed` primary-period values are auto-converted to `Randomized` when loading saved files.
+- Country-level configuration table (up to 20 countries)
+- Country targets and SAR/RR milestone inputs drive enrollment curves
+- Recruitment type must be selected before country selection is enabled
+- Global uncertainty controls (optional)
+- Outputs include:
+  - Run Inputs Used
+  - Country Summary (with cumulative totals, durations, recruitment rate)
+  - Global roll-up
+  - Global + country cumulative chart
+  - Site activation over time
+  - Country drill-down (collapsible)
+  - Pie view (collapsible)
+  - Map view (collapsible)
+- Save/Load via JSON import/export
+- PDF export from results section
+
+## Save/Load Behavior
+
+Current persisted workflow is JSON import/export from the app UI:
+
+- Simple mode: Comparison tab -> `Save / Load Comparison`
+- Advanced mode: `Save / Load` expander
+
+Compatibility handling:
+
+- Legacy simple mode label values are normalized on load
+- Legacy `Completed` recruitment-period values are normalized to `Randomized` on load
+
+## Deployment Notes (Streamlit Community Cloud)
+
+For fast deployment:
+
+1. Push `main` to GitHub.
+2. Create app on Streamlit Community Cloud.
+3. Use entrypoint: `ui/app.py`.
+4. Add any required secrets in app settings.
+
+Note: current built-in save/load workflow is JSON import/export; no hosted database is required for demo deployment.
+
+## Project Structure
+
+- `ui/` - Streamlit app pages, components, and persistence helpers
+- `engine/` - scenario solvers and state derivation logic
+- `export/` - advanced PDF report generation
+- `data/` - country reference datasets
+- `tests/` - unit/smoke tests
 
 ## Documentation
 
 - Operator guide: `/Users/stevensweeney/Desktop/Codex/OPERATOR_GUIDE.md`
-
-## Project Structure
-
-- `ui/` - Streamlit UI and persistence
-- `engine/` - solver and series derivation logic
-- `export/` - advanced PDF report generation
-- `data/` - country reference datasets
-- `tests/` - unit and smoke tests
