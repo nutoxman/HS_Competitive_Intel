@@ -67,10 +67,10 @@ def _default_chart_style() -> dict[str, object]:
         "legend_position": "Right",
         "font_family": "sans-serif",
         "font_size": 10,
-        "line_width": 2.0,
-        "uncertainty_opacity": 0.18,
-        "active_sites_opacity": 0.25,
-        "active_sites_bar_width": ACTIVE_SITES_BAR_WIDTH_PX,
+        "line_width": 1.5,
+        "uncertainty_opacity": 0.20,
+        "active_sites_opacity": 0.40,
+        "active_sites_bar_width": 15.0,
         "color_screened": "#00C2FF",
         "color_randomized": "#FF4D00",
         "color_completed": "#00E676",
@@ -846,6 +846,13 @@ def render_results(out, scenario_key: str):
     style_keys = _chart_style_keys(scenario_key)
     for field_name, widget_key in style_keys.items():
         st.session_state.setdefault(widget_key, style_defaults[field_name])
+    style_defaults_version = 2
+    style_defaults_version_key = f"{scenario_key}_chart_style_defaults_version"
+    if st.session_state.get(style_defaults_version_key) != style_defaults_version:
+        for field_name, widget_key in style_keys.items():
+            st.session_state[widget_key] = style_defaults[field_name]
+        _apply_palette_to_state(style_keys, str(style_defaults["palette_name"]))
+        st.session_state[style_defaults_version_key] = style_defaults_version
     if st.session_state.get(style_keys["palette_name"]) not in CHART_COLOR_PALETTES:
         st.session_state[style_keys["palette_name"]] = style_defaults["palette_name"]
     editor_open_key = f"{scenario_key}_chart_editor_open"
