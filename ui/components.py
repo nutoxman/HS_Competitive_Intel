@@ -1076,7 +1076,13 @@ def render_results(out, scenario_key: str):
             key=chart_range_key,
         )
         if st.button("Edit chart", key=f"{scenario_key}_chart_editor_toggle", use_container_width=False):
-            st.session_state[editor_open_key] = not bool(st.session_state.get(editor_open_key, False))
+            next_open = not bool(st.session_state.get(editor_open_key, False))
+            st.session_state[editor_open_key] = next_open
+            if next_open:
+                for field_name, widget_key in style_keys.items():
+                    st.session_state[widget_key] = style_defaults[field_name]
+                _apply_palette_to_state(style_keys, str(style_defaults["palette_name"]))
+                st.session_state[f"{scenario_key}_chart_style_defaults_version"] = 2
 
         if st.session_state.get(editor_open_key, False):
             with st.container(border=True):
