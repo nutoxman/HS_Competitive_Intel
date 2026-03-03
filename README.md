@@ -1,0 +1,1 @@
+# HS_Competitive_Intel
