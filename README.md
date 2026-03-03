@@ -15,6 +15,42 @@ GitHub: [nutoxman/RecruitmentScenarioPlannerV2](https://github.com/nutoxman/Recr
 - Interactive charts (date-range control, timeline markers, chart styling editor)
 - Advanced outputs: country summary, global roll-up, drill-down, pie/map views, and PDF export
 
+## HS Competitive Intelligence Tracker
+
+This repository now also includes a separate Streamlit app for HS competitive intelligence:
+
+- App entrypoint: `/Users/stevensweeney/Desktop/Codex/ui/hs_tracker_app.py`
+- Run command: `make run-hs`
+- Backing package: `/Users/stevensweeney/Desktop/Codex/hs_tracker`
+
+Implemented features:
+
+- Program list with server-side rollups (activity score, staleness, quiet-but-advancing)
+- Program detail page (overview, trials, timeline, sources)
+- Trial explorer with inclusion/exclusion visibility
+- Executive heatmap + CSV/PDF export
+- QC dashboard + JSON export
+- ClinicalTrials.gov ingestion workflow
+- Sponsor source scraping workflow (RSS + source-specific press-release pages + pipeline pages)
+- Sponsor pipeline deck scan workflow (latest 4 PDFs per sponsor directory)
+
+Ingestion commands:
+
+- `make hs-refresh-ctgov`
+- `make hs-scan-sources`
+- `make hs-scan-decks`
+- `make hs-ingest-all`
+
+Source config files:
+
+- Runtime config: `/Users/stevensweeney/Desktop/Codex/data/source_configs/sponsor_sources.json`
+- Editable example: `/Users/stevensweeney/Desktop/Codex/data/source_configs/sponsor_sources.example.json`
+
+Scheduling templates:
+
+- Cron template: `/Users/stevensweeney/Desktop/Codex/ops/cron/hs_tracker.cron.example`
+- systemd templates: `/Users/stevensweeney/Desktop/Codex/ops/systemd/`
+
 ## Requirements
 
 - Python `3.12+` (local workspace currently uses `3.14`)

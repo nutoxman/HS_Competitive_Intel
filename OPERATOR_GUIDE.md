@@ -154,3 +154,25 @@ Resolution workflow:
 - Advanced mode page: `/Users/stevensweeney/Desktop/Codex/ui/app_advanced.py`
 - Save/load serialization: `/Users/stevensweeney/Desktop/Codex/ui/persistence.py`
 - PDF export: `/Users/stevensweeney/Desktop/Codex/export/advanced_pdf.py`
+
+## 8) HS Tracker Operations
+
+HS tracker app:
+
+```bash
+make run-hs
+```
+
+HS ingestion jobs:
+
+```bash
+make hs-refresh-ctgov
+make hs-scan-sources
+make hs-scan-decks
+make hs-ingest-all
+```
+
+Scheduler templates:
+
+- Cron: `/Users/stevensweeney/Desktop/Codex/ops/cron/hs_tracker.cron.example`
+- systemd: `/Users/stevensweeney/Desktop/Codex/ops/systemd/`

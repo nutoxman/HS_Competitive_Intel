@@ -1,0 +1,10 @@
+[Unit]
+Description=Run HS Tracker deck scan monthly
+
+[Timer]
+OnCalendar=*-*-01 06:00:00
+Persistent=true
+Unit=hs-deck-scan.service
+
+[Install]
+WantedBy=timers.target

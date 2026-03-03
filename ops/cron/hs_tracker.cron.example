@@ -1,0 +1,17 @@
+# HS Tracker scheduled ingestion
+# Install with: crontab ops/cron/hs_tracker.cron.example (after replacing placeholders)
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Optional env override
+HS_TRACKER_DB_PATH=<CODEX_REPO>/data/hs_tracker.db
+
+# 1) Daily ClinicalTrials.gov refresh (04:15)
+15 4 * * * cd <CODEX_REPO> && <PYTHON_BIN> -m hs_tracker.jobs.run_ctgov_refresh --rolling-years 5 --max-pages 30 --page-size 100 >> <CODEX_REPO>/logs/hs_ctgov_refresh.log 2>&1
+
+# 2) Weekly sponsor source scan (Mondays 05:30)
+30 5 * * 1 cd <CODEX_REPO> && <PYTHON_BIN> -m hs_tracker.jobs.run_source_scan --config data/source_configs/sponsor_sources.json >> <CODEX_REPO>/logs/hs_source_scan.log 2>&1
+
+# 3) Monthly pipeline deck scan (1st day of month 06:00)
+0 6 1 * * cd <CODEX_REPO> && <PYTHON_BIN> -m hs_tracker.jobs.run_deck_scan --deck-root data/pipeline_decks >> <CODEX_REPO>/logs/hs_deck_scan.log 2>&1

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run HS Tracker source scan weekly
+
+[Timer]
+OnCalendar=Mon *-*-* 05:30:00
+Persistent=true
+Unit=hs-source-scan.service
+
+[Install]
+WantedBy=timers.target

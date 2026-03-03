@@ -1,0 +1,10 @@
+[Unit]
+Description=Run HS Tracker ClinicalTrials.gov refresh daily
+
+[Timer]
+OnCalendar=*-*-* 04:15:00
+Persistent=true
+Unit=hs-ctgov-refresh.service
+
+[Install]
+WantedBy=timers.target

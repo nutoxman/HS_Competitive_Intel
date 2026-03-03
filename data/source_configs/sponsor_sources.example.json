@@ -1,0 +1,76 @@
+{
+  "sponsors": [
+    {
+      "sponsor": "Novartis",
+      "company": "Novartis",
+      "press_release_feeds": [
+        {
+          "name": "Novartis News RSS",
+          "url": "https://www.novartis.com/rss.xml"
+        }
+      ],
+      "press_release_pages": [
+        {
+          "name": "Novartis Media Releases",
+          "url": "https://www.novartis.com/news/media-releases",
+          "item_selector": "article",
+          "title_selector": "h3, h2",
+          "link_selector": "a",
+          "date_selector": "time",
+          "date_attr": "datetime",
+          "summary_selector": "p",
+          "max_items": 20
+        }
+      ],
+      "pipeline_pages": [
+        {
+          "name": "Novartis Pipeline",
+          "url": "https://www.novartis.com/research-development/pipeline",
+          "include_selectors": ["main"],
+          "exclude_selectors": ["script", "style", "nav", "footer"]
+        }
+      ]
+    },
+    {
+      "sponsor": "Incyte",
+      "company": "Incyte",
+      "press_release_feeds": [
+        {
+          "name": "Incyte News RSS",
+          "url": "https://investor.incyte.com/rss/news-releases.xml"
+        }
+      ],
+      "pipeline_pages": [
+        {
+          "name": "Incyte Pipeline",
+          "url": "https://www.incyte.com/pipeline",
+          "include_selectors": ["main"]
+        }
+      ]
+    },
+    {
+      "sponsor": "MoonLake",
+      "company": "MoonLake",
+      "press_release_pages": [
+        {
+          "name": "MoonLake News",
+          "url": "https://www.moonlaketx.com/news/",
+          "item_selector": "article",
+          "title_selector": "h2",
+          "link_selector": "a",
+          "date_selector": "time",
+          "date_attr": "datetime",
+          "summary_selector": "p",
+          "max_items": 20
+        }
+      ],
+      "pipeline_pages": [
+        {
+          "name": "MoonLake Pipeline",
+          "url": "https://www.moonlaketx.com/pipeline/",
+          "include_selectors": ["main"]
+        }
+      ]
+    }
+  ]
+}

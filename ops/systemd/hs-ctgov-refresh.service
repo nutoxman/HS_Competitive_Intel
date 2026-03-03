@@ -1,0 +1,12 @@
+[Unit]
+Description=HS Tracker ClinicalTrials.gov Refresh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=<CODEX_REPO>
+Environment=HS_TRACKER_DB_PATH=<CODEX_REPO>/data/hs_tracker.db
+ExecStart=<PYTHON_BIN> -m hs_tracker.jobs.run_ctgov_refresh --rolling-years 5 --max-pages 30 --page-size 100
+User=<SERVICE_USER>
+Group=<SERVICE_GROUP>
