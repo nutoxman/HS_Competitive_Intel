@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import html
 import json
+import os
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -32,6 +33,21 @@ Fetcher = Callable[[str], FetchResponse]
 SIMPLE_SELECTOR_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
 
 
+def _ssl_verify_setting() -> bool | str:
+    ca_bundle = os.getenv("HS_TRACKER_CA_BUNDLE", "").strip()
+    skip_verify = os.getenv("HS_TRACKER_SKIP_SSL_VERIFY", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if skip_verify:
+        return False
+    if ca_bundle:
+        return ca_bundle
+    return True
+
+
 def _default_fetcher(url: str) -> FetchResponse:
     try:
         import requests
@@ -40,13 +56,22 @@ def _default_fetcher(url: str) -> FetchResponse:
             "requests is required for source scanning. Install from requirements.txt"
         ) from exc
 
-    response = requests.get(  # noqa: S113
-        url,
-        timeout=30,
-        headers={
-            "User-Agent": "hs-tracker-bot/1.0 (+https://example.local/hs-tracker)",
-        },
-    )
+    verify = _ssl_verify_setting()
+    try:
+        response = requests.get(  # noqa: S113
+            url,
+            timeout=30,
+            verify=verify,
+            headers={
+                "User-Agent": "hs-tracker-bot/1.0 (+https://example.local/hs-tracker)",
+            },
+        )
+    except requests.exceptions.SSLError as exc:
+        raise RuntimeError(
+            "Source scan SSL verification failed. Set HS_TRACKER_CA_BUNDLE to your "
+            "trusted CA bundle path, or set HS_TRACKER_SKIP_SSL_VERIFY=1 for local "
+            "testing only."
+        ) from exc
     return FetchResponse(
         text=response.text,
         url=response.url,
@@ -583,6 +608,7 @@ def scan_sponsor_sources(
         "feeds_scanned": 0,
         "press_pages_scanned": 0,
         "pipeline_pages_scanned": 0,
+        "fetch_errors": 0,
         "events_emitted": 0,
     }
 
@@ -608,7 +634,11 @@ def scan_sponsor_sources(
             if not feed_url:
                 continue
 
-            response = fetch(feed_url)
+            try:
+                response = fetch(feed_url)
+            except Exception:
+                stats["fetch_errors"] += 1
+                continue
             if response.status_code >= 400:
                 continue
 
@@ -627,7 +657,11 @@ def scan_sponsor_sources(
             page_url = _safe_text(page_cfg.get("url"))
             if not page_url:
                 continue
-            response = fetch(page_url)
+            try:
+                response = fetch(page_url)
+            except Exception:
+                stats["fetch_errors"] += 1
+                continue
             if response.status_code >= 400:
                 continue
 
@@ -645,7 +679,11 @@ def scan_sponsor_sources(
             page_url = _safe_text(pipeline_cfg.get("url"))
             if not page_url:
                 continue
-            response = fetch(page_url)
+            try:
+                response = fetch(page_url)
+            except Exception:
+                stats["fetch_errors"] += 1
+                continue
             if response.status_code >= 400:
                 continue
 

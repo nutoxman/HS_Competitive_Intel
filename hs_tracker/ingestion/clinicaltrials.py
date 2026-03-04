@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import json
+import os
 from datetime import date, timedelta
 from typing import Any
 from urllib.parse import urlencode
-from urllib.request import urlopen
+
+import requests
 
 from hs_tracker.constants import (
     ACADEMIC_KEYWORDS,
@@ -51,6 +52,22 @@ def _parse_date(value: str | None) -> str | None:
     if len(clean) == 4:
         return f"{clean}-01-01"
     return None
+
+
+def _ssl_verify_setting() -> bool | str:
+    # Preferred: point to org CA bundle if outbound TLS is intercepted.
+    ca_bundle = os.getenv("HS_TRACKER_CA_BUNDLE", "").strip()
+    skip_verify = os.getenv("HS_TRACKER_SKIP_SSL_VERIFY", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if skip_verify:
+        return False
+    if ca_bundle:
+        return ca_bundle
+    return True
 
 
 def _to_list(value: Any) -> list[Any]:
@@ -263,9 +280,26 @@ def _fetch_page(next_page_token: str | None, page_size: int) -> dict[str, Any]:
         params["pageToken"] = next_page_token
 
     url = f"{CTGOV_BASE}?{urlencode(params)}"
-    with urlopen(url, timeout=60) as response:
-        payload = response.read().decode("utf-8")
-    return json.loads(payload)
+    verify = _ssl_verify_setting()
+    try:
+        response = requests.get(  # noqa: S113
+            url,
+            timeout=60,
+            verify=verify,
+            headers={
+                "User-Agent": "hs-tracker-bot/1.0 (+https://example.local/hs-tracker)",
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.SSLError as exc:
+        raise RuntimeError(
+            "ClinicalTrials.gov SSL verification failed. Set HS_TRACKER_CA_BUNDLE "
+            "to your trusted CA bundle path, or set HS_TRACKER_SKIP_SSL_VERIFY=1 "
+            "for local testing only."
+        ) from exc
+    except requests.exceptions.RequestException as exc:
+        raise RuntimeError(f"ClinicalTrials.gov fetch failed: {exc}") from exc
 
 
 def refresh_clinicaltrials(

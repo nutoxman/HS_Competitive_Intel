@@ -1,13 +1,19 @@
+# ruff: noqa: E402
 from __future__ import annotations
 
 import io
 import json
 from datetime import date
 from pathlib import Path
+import sys
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from hs_tracker.config import load_config
 from hs_tracker.constants import DEFAULT_ROLLING_YEARS, EVENT_TYPE_TO_CATEGORY
@@ -451,9 +457,17 @@ def _render_admin() -> None:
             step=1,
         )
         if st.button("Run ClinicalTrials refresh"):
-            with connect(cfg.db_path) as conn:
-                stats = refresh_clinicaltrials(conn, rolling_years=int(rolling_years))
-            st.success(f"ClinicalTrials refresh complete: {stats}")
+            try:
+                with connect(cfg.db_path) as conn:
+                    stats = refresh_clinicaltrials(conn, rolling_years=int(rolling_years))
+                st.success(f"ClinicalTrials refresh complete: {stats}")
+            except Exception as exc:  # noqa: BLE001
+                st.error(str(exc))
+                st.info(
+                    "If your network uses SSL interception, set "
+                    "`HS_TRACKER_CA_BUNDLE=/path/to/ca-bundle.pem` or, for local "
+                    "testing only, `HS_TRACKER_SKIP_SSL_VERIFY=1`."
+                )
 
     col3, col4 = st.columns(2)
     with col3:
@@ -466,15 +480,18 @@ def _render_admin() -> None:
                 with connect(cfg.db_path) as conn:
                     stats = scan_sponsor_sources(conn, config_path=Path(source_config))
                 st.success(f"Source scan complete: {stats}")
-            except (FileNotFoundError, RuntimeError, ValueError) as exc:
+            except Exception as exc:  # noqa: BLE001
                 st.error(str(exc))
 
     with col4:
         deck_root = st.text_input("Deck root directory", value="data/pipeline_decks")
         if st.button("Run sponsor deck scan"):
-            with connect(cfg.db_path) as conn:
-                stats = scan_all_sponsors(conn, Path(deck_root))
-            st.success(f"Deck scan complete: {stats}")
+            try:
+                with connect(cfg.db_path) as conn:
+                    stats = scan_all_sponsors(conn, Path(deck_root))
+                st.success(f"Deck scan complete: {stats}")
+            except Exception as exc:  # noqa: BLE001
+                st.error(str(exc))
 
     st.markdown("### Add or update product")
     with st.form("product_form"):

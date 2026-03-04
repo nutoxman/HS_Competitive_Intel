@@ -1,0 +1,432 @@
+{
+  "sponsors": [
+    {
+      "sponsor": "Incyte Corporation",
+      "company": "Incyte Corporation",
+      "press_release_feeds": [
+        {
+          "name": "Incyte Corporation HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Incyte+Corporation%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ],
+      "pipeline_pages": [
+        {
+          "name": "Incyte Pipeline",
+          "url": "https://www.incyte.com/pipeline",
+          "include_selectors": [
+            "main"
+          ]
+        }
+      ],
+      "press_release_pages": [
+        {
+          "name": "Incyte News Releases",
+          "url": "https://investor.incyte.com/news-releases",
+          "item_selector": "li, article",
+          "title_selector": "a, h3, h2",
+          "link_selector": "a",
+          "date_selector": "time",
+          "date_attr": "datetime",
+          "summary_selector": "p",
+          "max_items": 25
+        }
+      ]
+    },
+    {
+      "sponsor": "Sanofi",
+      "company": "Sanofi",
+      "press_release_feeds": [
+        {
+          "name": "Sanofi HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Sanofi%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ],
+      "pipeline_pages": [
+        {
+          "name": "Sanofi Pipeline",
+          "url": "https://www.sanofi.com/en/our-science/our-pipeline",
+          "include_selectors": [
+            "main"
+          ]
+        }
+      ]
+    },
+    {
+      "sponsor": "Boehringer Ingelheim",
+      "company": "Boehringer Ingelheim",
+      "press_release_feeds": [
+        {
+          "name": "Boehringer Ingelheim HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Boehringer+Ingelheim%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ],
+      "pipeline_pages": [
+        {
+          "name": "Boehringer Pipeline",
+          "url": "https://www.boehringer-ingelheim.com/science-innovation/human-health-innovation/pipeline",
+          "include_selectors": [
+            "main"
+          ]
+        }
+      ]
+    },
+    {
+      "sponsor": "MoonLake Immunotherapeutics AG",
+      "company": "MoonLake Immunotherapeutics AG",
+      "press_release_feeds": [
+        {
+          "name": "MoonLake Immunotherapeutics AG HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22MoonLake+Immunotherapeutics+AG%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ],
+      "pipeline_pages": [
+        {
+          "name": "MoonLake Pipeline",
+          "url": "https://www.moonlaketx.com/pipeline/",
+          "include_selectors": [
+            "main"
+          ]
+        }
+      ],
+      "press_release_pages": [
+        {
+          "name": "MoonLake News",
+          "url": "https://www.moonlaketx.com/news/",
+          "item_selector": "article",
+          "title_selector": "h2, h3",
+          "link_selector": "a",
+          "date_selector": "time",
+          "date_attr": "datetime",
+          "summary_selector": "p",
+          "max_items": 25
+        }
+      ]
+    },
+    {
+      "sponsor": "AbbVie",
+      "company": "AbbVie",
+      "press_release_feeds": [
+        {
+          "name": "AbbVie HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22AbbVie%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ],
+      "pipeline_pages": [
+        {
+          "name": "AbbVie Pipeline",
+          "url": "https://www.abbvie.com/our-science/pipeline.html",
+          "include_selectors": [
+            "main"
+          ]
+        }
+      ]
+    },
+    {
+      "sponsor": "UCB Biopharma SRL",
+      "company": "UCB Biopharma SRL",
+      "press_release_feeds": [
+        {
+          "name": "UCB Biopharma SRL HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22UCB+Biopharma+SRL%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ],
+      "pipeline_pages": [
+        {
+          "name": "UCB Pipeline",
+          "url": "https://www.ucb.com/innovation/pipeline",
+          "include_selectors": [
+            "main"
+          ]
+        }
+      ]
+    },
+    {
+      "sponsor": "ACELYRIN Inc.",
+      "company": "ACELYRIN Inc.",
+      "press_release_feeds": [
+        {
+          "name": "ACELYRIN Inc. HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22ACELYRIN+Inc.%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ]
+    },
+    {
+      "sponsor": "Leadingtac Pharmaceutical (Shaoxing) Co., Ltd.",
+      "company": "Leadingtac Pharmaceutical (Shaoxing) Co., Ltd.",
+      "press_release_feeds": [
+        {
+          "name": "Leadingtac Pharmaceutical (Shaoxing) Co., Ltd. HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Leadingtac+Pharmaceutical+%28Shaoxing%29+Co.%2C+Ltd.%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ]
+    },
+    {
+      "sponsor": "Novartis Pharmaceuticals",
+      "company": "Novartis Pharmaceuticals",
+      "press_release_feeds": [
+        {
+          "name": "Novartis Pharmaceuticals HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Novartis+Pharmaceuticals%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ],
+      "pipeline_pages": [
+        {
+          "name": "Novartis Pipeline",
+          "url": "https://www.novartis.com/research-development/pipeline",
+          "include_selectors": [
+            "main"
+          ]
+        }
+      ],
+      "press_release_pages": [
+        {
+          "name": "Novartis Media Releases",
+          "url": "https://www.novartis.com/news/media-releases",
+          "item_selector": "article",
+          "title_selector": "h3, h2",
+          "link_selector": "a",
+          "date_selector": "time",
+          "date_attr": "datetime",
+          "summary_selector": "p",
+          "max_items": 25
+        }
+      ]
+    },
+    {
+      "sponsor": "Staidson (Beijing) Biopharmaceuticals Co., Ltd",
+      "company": "Staidson (Beijing) Biopharmaceuticals Co., Ltd",
+      "press_release_feeds": [
+        {
+          "name": "Staidson (Beijing) Biopharmaceuticals Co., Ltd HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Staidson+%28Beijing%29+Biopharmaceuticals+Co.%2C+Ltd%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ]
+    },
+    {
+      "sponsor": "Almirall, S.A.",
+      "company": "Almirall, S.A.",
+      "press_release_feeds": [
+        {
+          "name": "Almirall, S.A. HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Almirall%2C+S.A.%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ]
+    },
+    {
+      "sponsor": "Aristea Therapeutics, Inc.",
+      "company": "Aristea Therapeutics, Inc.",
+      "press_release_feeds": [
+        {
+          "name": "Aristea Therapeutics, Inc. HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Aristea+Therapeutics%2C+Inc.%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ]
+    },
+    {
+      "sponsor": "Avalo Therapeutics, Inc.",
+      "company": "Avalo Therapeutics, Inc.",
+      "press_release_feeds": [
+        {
+          "name": "Avalo Therapeutics, Inc. HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Avalo+Therapeutics%2C+Inc.%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ]
+    },
+    {
+      "sponsor": "Azora Therapeutics Australia Pty Ltd",
+      "company": "Azora Therapeutics Australia Pty Ltd",
+      "press_release_feeds": [
+        {
+          "name": "Azora Therapeutics Australia Pty Ltd HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Azora+Therapeutics+Australia+Pty+Ltd%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ]
+    },
+    {
+      "sponsor": "Citryll BV",
+      "company": "Citryll BV",
+      "press_release_feeds": [
+        {
+          "name": "Citryll BV HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Citryll+BV%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ]
+    },
+    {
+      "sponsor": "Eli Lilly and Company",
+      "company": "Eli Lilly and Company",
+      "press_release_feeds": [
+        {
+          "name": "Eli Lilly and Company HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Eli+Lilly+and+Company%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ],
+      "pipeline_pages": [
+        {
+          "name": "Lilly Pipeline",
+          "url": "https://www.lilly.com/discovery/clinical-development-pipeline",
+          "include_selectors": [
+            "main"
+          ]
+        }
+      ]
+    },
+    {
+      "sponsor": "InflaRx GmbH",
+      "company": "InflaRx GmbH",
+      "press_release_feeds": [
+        {
+          "name": "InflaRx GmbH HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22InflaRx+GmbH%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ]
+    },
+    {
+      "sponsor": "Insmed Incorporated",
+      "company": "Insmed Incorporated",
+      "press_release_feeds": [
+        {
+          "name": "Insmed Incorporated HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Insmed+Incorporated%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ]
+    },
+    {
+      "sponsor": "Institut Pasteur",
+      "company": "Institut Pasteur",
+      "press_release_feeds": [
+        {
+          "name": "Institut Pasteur HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Institut+Pasteur%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ]
+    },
+    {
+      "sponsor": "Janssen Research & Development, LLC",
+      "company": "Janssen Research & Development, LLC",
+      "press_release_feeds": [
+        {
+          "name": "Janssen Research & Development, LLC HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Janssen+Research+%26+Development%2C+LLC%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ],
+      "pipeline_pages": [
+        {
+          "name": "J&J Innovative Medicine Pipeline",
+          "url": "https://www.jnj.com/innovation/pipeline",
+          "include_selectors": [
+            "main"
+          ]
+        }
+      ]
+    },
+    {
+      "sponsor": "Laboratorios Richmond S.A.C.I.F.",
+      "company": "Laboratorios Richmond S.A.C.I.F.",
+      "press_release_feeds": [
+        {
+          "name": "Laboratorios Richmond S.A.C.I.F. HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Laboratorios+Richmond+S.A.C.I.F.%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ]
+    },
+    {
+      "sponsor": "Merck Sharp & Dohme LLC",
+      "company": "Merck Sharp & Dohme LLC",
+      "press_release_feeds": [
+        {
+          "name": "Merck Sharp & Dohme LLC HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Merck+Sharp+%26+Dohme+LLC%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ],
+      "pipeline_pages": [
+        {
+          "name": "Merck Pipeline",
+          "url": "https://www.merck.com/research/pipeline/",
+          "include_selectors": [
+            "main"
+          ]
+        }
+      ]
+    },
+    {
+      "sponsor": "Qilu Pharmaceutical Co., Ltd.",
+      "company": "Qilu Pharmaceutical Co., Ltd.",
+      "press_release_feeds": [
+        {
+          "name": "Qilu Pharmaceutical Co., Ltd. HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Qilu+Pharmaceutical+Co.%2C+Ltd.%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ]
+    },
+    {
+      "sponsor": "Shanghai Huaota Biopharmaceutical Co., Ltd.",
+      "company": "Shanghai Huaota Biopharmaceutical Co., Ltd.",
+      "press_release_feeds": [
+        {
+          "name": "Shanghai Huaota Biopharmaceutical Co., Ltd. HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Shanghai+Huaota+Biopharmaceutical+Co.%2C+Ltd.%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ]
+    },
+    {
+      "sponsor": "Shanghai Qilu Pharmaceutical Research and Development Center LTD",
+      "company": "Shanghai Qilu Pharmaceutical Research and Development Center LTD",
+      "press_release_feeds": [
+        {
+          "name": "Shanghai Qilu Pharmaceutical Research and Development Center LTD HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Shanghai+Qilu+Pharmaceutical+Research+and+Development+Center+LTD%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ]
+    },
+    {
+      "sponsor": "Sinocelltech Ltd.",
+      "company": "Sinocelltech Ltd.",
+      "press_release_feeds": [
+        {
+          "name": "Sinocelltech Ltd. HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Sinocelltech+Ltd.%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ]
+    },
+    {
+      "sponsor": "Takeda",
+      "company": "Takeda",
+      "press_release_feeds": [
+        {
+          "name": "Takeda HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Takeda%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ],
+      "pipeline_pages": [
+        {
+          "name": "Takeda Pipeline",
+          "url": "https://www.takeda.com/what-we-do/research-and-development/pipeline/",
+          "include_selectors": [
+            "main"
+          ]
+        }
+      ]
+    },
+    {
+      "sponsor": "Vanda Pharmaceuticals",
+      "company": "Vanda Pharmaceuticals",
+      "press_release_feeds": [
+        {
+          "name": "Vanda Pharmaceuticals HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Vanda+Pharmaceuticals%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ]
+    },
+    {
+      "sponsor": "Zura Bio Inc",
+      "company": "Zura Bio Inc",
+      "press_release_feeds": [
+        {
+          "name": "Zura Bio Inc HS News RSS",
+          "url": "https://news.google.com/rss/search?q=%22Zura+Bio+Inc%22+hidradenitis+suppurativa+%28pipeline+OR+trial+OR+phase+OR+results%29&hl=en-US&gl=US&ceid=US:en"
+        }
+      ]
+    }
+  ]
+}
